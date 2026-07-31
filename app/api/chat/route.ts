@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI, FunctionDeclaration, SchemaType } from "@google/generative-ai";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/authOptions";
-import { listEvents, createEvent } from "@/lib/calendar";
+import { listEvents, createEvent, deleteEvent, updateEvent } from "@/lib/calendar";
 import { NextResponse } from "next/server";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
@@ -53,6 +53,48 @@ const createEventFunction: FunctionDeclaration = {
   },
 };
 
+const deleteEventFunction: FunctionDeclaration = {
+  name: "delete_event",
+  description: "Deletes an existing event from the user's Google Calendar.",
+  parameters: {
+    type: SchemaType.OBJECT,
+    properties: {
+      eventId: {
+        type: SchemaType.STRING,
+        description: "The unique ID of the event to delete. You must call list_events first to find this ID.",
+      },
+    },
+    required: ["eventId"],
+  },
+};
+
+const updateEventFunction: FunctionDeclaration = {
+  name: "update_event",
+  description: "Updates an existing event on the user's Google Calendar.",
+  parameters: {
+    type: SchemaType.OBJECT,
+    properties: {
+      eventId: {
+        type: SchemaType.STRING,
+        description: "The unique ID of the event to update. You must call list_events first to find this ID.",
+      },
+      title: {
+        type: SchemaType.STRING,
+        description: "The new title of the event (optional).",
+      },
+      startTime: {
+        type: SchemaType.STRING,
+        description: "The new start time of the event in ISO format (optional).",
+      },
+      endTime: {
+        type: SchemaType.STRING,
+        description: "The new end time of the event in ISO format (optional).",
+      },
+    },
+    required: ["eventId"],
+  },
+};
+
 const systemInstruction = `You are a helpful AI scheduling assistant. 
 Your goal is to help users manage their calendar by scheduling meetings and checking availability.
 
@@ -96,8 +138,8 @@ export async function POST(req: Request) {
     }
 
     const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
-      tools: [{ functionDeclarations: [listEventsFunction, createEventFunction] }],
+      model: "gemini-3.1-flash-lite",
+      tools: [{ functionDeclarations: [listEventsFunction, createEventFunction, deleteEventFunction, updateEventFunction] }],
       systemInstruction: systemInstruction,
     });
 
@@ -123,6 +165,14 @@ export async function POST(req: Request) {
         } else if (call.name === "create_event") {
           const args = call.args as any;
           const event = await createEvent(session, args.title, args.startTime, args.endTime, args.attendees);
+          functionResult = { status: "success", event };
+        } else if (call.name === "delete_event") {
+          const args = call.args as any;
+          const result = await deleteEvent(session, args.eventId);
+          functionResult = { status: "success", result };
+        } else if (call.name === "update_event") {
+          const args = call.args as any;
+          const event = await updateEvent(session, args.eventId, args.title, args.startTime, args.endTime, args.attendees);
           functionResult = { status: "success", event };
         } else {
           functionResult = { error: "Unknown function" };

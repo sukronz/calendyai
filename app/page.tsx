@@ -25,6 +25,10 @@ export default function Home() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const silenceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isRecordingRef = useRef<boolean>(false);
+  
+  // Audio playback queue refs
+  const textQueueRef = useRef<string[]>([]);
+  const isPlayingRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -149,22 +153,49 @@ export default function Home() {
     }
   };
 
-  const playTTS = async (text: string) => {
+  const playTTS = (text: string) => {
+    if (!text) return;
+    const cleanText = text.replace(/[*#]/g, ""); // strip basic markdown for speech
+    textQueueRef.current.push(cleanText);
+    processTextQueue();
+  };
+
+  const processTextQueue = async () => {
+    if (isPlayingRef.current || textQueueRef.current.length === 0) return;
+    
+    isPlayingRef.current = true;
+    const text = textQueueRef.current.shift()!;
+    
     try {
-      const cleanText = text.replace(/[*#]/g, ""); // strip basic markdown for speech
       const res = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: cleanText }),
+        body: JSON.stringify({ text }),
       });
+      
       if (res.ok) {
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
-        audio.play();
+        
+        audio.play().catch(e => {
+          console.error("Error playing audio:", e);
+          isPlayingRef.current = false;
+          processTextQueue();
+        });
+        
+        audio.onended = () => {
+          isPlayingRef.current = false;
+          processTextQueue();
+        };
+      } else {
+        isPlayingRef.current = false;
+        processTextQueue();
       }
     } catch (err) {
       console.error("TTS error:", err);
+      isPlayingRef.current = false;
+      processTextQueue();
     }
   };
 
@@ -188,7 +219,7 @@ export default function Home() {
       });
 
       const data = await response.json();
-      const reply = data.reply;
+      const reply = data.reply || data.error || "Sorry, I encountered an unexpected error.";
       setMessages((prev) => [...prev, { role: "agent", content: reply }]);
       
       setRefreshKey(Date.now());

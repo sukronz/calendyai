@@ -60,3 +60,41 @@ export async function createEvent(
 
   return response.data;
 }
+
+export async function deleteEvent(session: Session, eventId: string) {
+  const calendar = await getCalendarClient(session);
+  
+  await calendar.events.delete({
+    calendarId: "primary",
+    eventId: eventId,
+    sendUpdates: "all",
+  });
+  
+  return { status: "deleted", eventId };
+}
+
+export async function updateEvent(
+  session: Session,
+  eventId: string,
+  title?: string,
+  startTime?: string,
+  endTime?: string,
+  attendees?: string[]
+) {
+  const calendar = await getCalendarClient(session);
+  
+  const eventPatch: any = {};
+  if (title) eventPatch.summary = title;
+  if (startTime) eventPatch.start = { dateTime: startTime };
+  if (endTime) eventPatch.end = { dateTime: endTime };
+  if (attendees) eventPatch.attendees = attendees.map(email => ({ email }));
+
+  const response = await calendar.events.patch({
+    calendarId: "primary",
+    eventId: eventId,
+    requestBody: eventPatch,
+    sendUpdates: "all",
+  });
+
+  return response.data;
+}
