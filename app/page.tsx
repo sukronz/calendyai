@@ -20,6 +20,7 @@ export default function Home() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<BlobPart[]>([]);
+  const messagesRef = useRef<{role: string, content: string}[]>([]);
   
   // Silence detection refs
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -37,8 +38,9 @@ export default function Home() {
   }, [status, router]);
 
   useEffect(() => {
+    messagesRef.current = messages;
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, refreshKey]);
 
   const startRecording = async () => {
     try {
@@ -200,13 +202,14 @@ export default function Home() {
   };
 
   const executeMessageFlow = async (text: string) => {
-    // Avoid double appending if using state
-    setMessages((prev) => {
-       const newMsgs = [...prev, { role: "user" as const, content: text }];
-       // execute api call
-       fetchChatResponse(newMsgs);
-       return newMsgs;
-    });
+    const newUserMsg = { role: "user" as const, content: text };
+    const newMsgs = [...messagesRef.current, newUserMsg];
+    
+    // Update UI
+    setMessages(newMsgs);
+    
+    // Execute API call exactly once
+    fetchChatResponse(newMsgs);
   };
 
   const fetchChatResponse = async (history: any[]) => {
