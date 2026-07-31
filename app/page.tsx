@@ -21,7 +21,7 @@ export default function Home() {
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<BlobPart[]>([]);
-  const messagesRef = useRef<{ role: string, content: string }[]>([]);
+  const messagesRef = useRef<{ role: "user" | "agent", content: string }[]>([]);
 
   // Silence detection refs
   const recognitionRef = useRef<any>(null);
@@ -253,36 +253,48 @@ export default function Home() {
   };
 
   if (status === "loading") {
-    return <div className="flex h-screen items-center justify-center bg-[#f5f5f7]"><div className="h-8 w-8 animate-spin rounded-full border-4 border-[#1d1d1f] border-t-transparent"></div></div>;
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#F0F0F0]">
+        <div className="h-12 w-12 animate-spin rounded-none border-4 border-[#121212] border-t-[#D02020]"></div>
+      </div>
+    );
   }
 
   if (!session) return null;
 
   return (
-    <div className="flex h-screen flex-col bg-[#f5f5f7] font-sans antialiased text-[#1d1d1f] overflow-hidden">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-[#d2d2d7]/40 bg-[#f5f5f7]/80 backdrop-blur-md px-8 z-20 relative">
-        <div className="flex items-center gap-2 font-semibold text-lg text-[#1d1d1f] tracking-tight">
-          <CalendarIcon className="h-5 w-5 text-[#1d1d1f]" />
-          Calendy<span className="text-[#86868b]">AI</span>
+    <div className="flex h-screen flex-col bg-[#F0F0F0] font-sans antialiased text-[#121212] overflow-hidden">
+      {/* Bauhaus Header */}
+      <header className="flex h-16 shrink-0 items-center justify-between border-b-4 border-[#121212] bg-white px-8 z-20 relative shadow-[0_4px_0px_0px_#121212]">
+        <div className="flex items-center gap-3 font-black text-xl tracking-tighter uppercase text-[#121212]">
+          {/* Bauhaus Geometric Composition Logo */}
+          <div className="flex items-center gap-1.5">
+            <div className="h-4 w-4 rounded-full bg-[#D02020] border-2 border-[#121212]"></div>
+            <div className="h-4 w-4 rounded-none bg-[#1040C0] border-2 border-[#121212]"></div>
+            <div className="w-0 h-0 border-l-[8px] border-l-transparent border-r-[8px] border-r-transparent border-b-[14px] border-b-[#F0C020]"></div>
+          </div>
+          CALENDY<span className="text-[#D02020]">.AI</span>
         </div>
-        <div className="flex items-center gap-6 text-sm font-medium text-[#1d1d1f]">
-          <div className="hidden sm:flex items-center gap-2">
-            <div className="h-2 w-2 rounded-full bg-green-500"></div>
+
+        <div className="flex items-center gap-6 text-xs font-bold uppercase tracking-wider text-[#121212]">
+          <div className="hidden sm:flex items-center gap-2 bg-[#F0C020] border-2 border-[#121212] px-3 py-1 shadow-[2px_2px_0px_0px_#121212]">
+            <div className="h-2.5 w-2.5 rounded-full bg-[#D02020] border border-[#121212]"></div>
             {session.user?.email}
           </div>
           <button
             onClick={() => signOut()}
-            className="flex items-center gap-1.5 text-[#86868b] hover:text-[#1d1d1f] transition-colors"
+            className="flex items-center gap-1.5 bg-[#D02020] hover:bg-[#b01818] text-white border-2 border-[#121212] px-3 py-1.5 shadow-[2px_2px_0px_0px_#121212] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all rounded-none cursor-pointer"
           >
             <LogOut className="h-4 w-4" />
-            <span className="hidden sm:inline">Sign Out</span>
+            <span className="hidden sm:inline">SIGN OUT</span>
           </button>
         </div>
       </header>
 
-      <main className="flex-1 w-full relative bg-[#f5f5f7] p-16 sm:p-12">
-        {/* Floating Card Calendar */}
-        <div className="w-full h-full bg-white rounded-3xl shadow-sm border border-[#d2d2d7]/70 overflow-hidden relative z-0">
+      {/* Main Canvas */}
+      <main className="flex-1 w-full relative bg-[#F0F0F0] p-6 sm:p-10">
+        {/* Bauhaus Graphic Poster Card Calendar */}
+        <div className="w-full h-full bg-white rounded-none border-4 border-[#121212] shadow-[8px_8px_0px_0px_#121212] overflow-hidden relative z-0">
           <iframe
             key={refreshKey}
             src={`https://calendar.google.com/calendar/embed?src=${encodeURIComponent(session.user?.email || "")}&mode=WEEK&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=1&showCalendars=0&showTz=0&wkst=1&bgcolor=%23ffffff`}
@@ -291,55 +303,56 @@ export default function Home() {
             height="100%"
             frameBorder="0"
             scrolling="yes"
-            className="w-full h-full"
+            className="w-full h-full bg-white"
           ></iframe>
         </div>
 
-        {/* Floating Voice Controls */}
-        <div className="absolute bottom-12 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-3 w-full px-4 sm:px-0">
+        {/* Bauhaus Floating Voice Controls */}
+        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-3 w-full px-4 sm:px-0">
           
           {/* Main Voice Dock */}
-          <div className="flex items-center gap-4 px-3 py-3 rounded-full backdrop-blur-2xl bg-white/65 border border-white/60 shadow-[0_8px_32px_rgba(0,0,0,0.12)] transition-all duration-500 ease-out">
+          <div className="flex items-center gap-4 px-4 py-3 rounded-none bg-[#F0C020] border-4 border-[#121212] shadow-[6px_6px_0px_0px_#121212] transition-all">
             <button
               type="button"
               onClick={isRecording ? stopRecording : startRecording}
               disabled={isLoading && !isPlaying}
-              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all shadow-sm ${isRecording
-                  ? "bg-red-500 text-white animate-pulse shadow-md shadow-red-500/30"
+              className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-none border-2 border-[#121212] transition-all shadow-[3px_3px_0px_0px_#121212] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer ${
+                isRecording
+                  ? "bg-[#D02020] text-white animate-pulse"
                   : isPlaying
-                    ? "bg-[#0071e3] text-white shadow-md shadow-[#0071e3]/30"
-                    : "bg-white text-[#1d1d1f] border border-[#d2d2d7]/50 hover:bg-[#f5f5f7]"
+                    ? "bg-[#1040C0] text-white"
+                    : "bg-white text-[#121212] hover:bg-[#F0F0F0]"
                 } disabled:opacity-50`}
             >
               {isRecording ? (
-                <Square className="h-4 w-4 fill-current" />
+                <Square className="h-5 w-5 fill-current" />
               ) : isPlaying ? (
-                <Sparkles className="h-4 w-4" />
+                <Sparkles className="h-5 w-5" />
               ) : (
-                <Mic className="h-4 w-4" />
+                <Mic className="h-5 w-5" />
               )}
             </button>
 
             {isPlaying && (
-              <div className="flex items-center justify-center gap-[3px] h-6 w-8 shrink-0 pr-3">
-                <div className="w-[3px] bg-[#0071e3] rounded-full h-full" style={{ animation: 'waveform 1s ease-in-out infinite 0.1s' }}></div>
-                <div className="w-[3px] bg-[#0071e3] rounded-full h-full" style={{ animation: 'waveform 1.2s ease-in-out infinite 0.3s' }}></div>
-                <div className="w-[3px] bg-[#0071e3] rounded-full h-full" style={{ animation: 'waveform 0.8s ease-in-out infinite 0.0s' }}></div>
-                <div className="w-[3px] bg-[#0071e3] rounded-full h-full" style={{ animation: 'waveform 1.1s ease-in-out infinite 0.4s' }}></div>
-                <div className="w-[3px] bg-[#0071e3] rounded-full h-full" style={{ animation: 'waveform 0.9s ease-in-out infinite 0.2s' }}></div>
+              <div className="flex items-center justify-center gap-[4px] h-6 w-10 shrink-0 pr-2">
+                <div className="w-[4px] bg-[#121212] rounded-none h-full" style={{ animation: 'waveform 1s ease-in-out infinite 0.1s' }}></div>
+                <div className="w-[4px] bg-[#D02020] rounded-none h-full" style={{ animation: 'waveform 1.2s ease-in-out infinite 0.3s' }}></div>
+                <div className="w-[4px] bg-[#1040C0] rounded-none h-full" style={{ animation: 'waveform 0.8s ease-in-out infinite 0.0s' }}></div>
+                <div className="w-[4px] bg-[#121212] rounded-none h-full" style={{ animation: 'waveform 1.1s ease-in-out infinite 0.4s' }}></div>
+                <div className="w-[4px] bg-[#D02020] rounded-none h-full" style={{ animation: 'waveform 0.9s ease-in-out infinite 0.2s' }}></div>
               </div>
             )}
           </div>
 
           {/* Secondary Transcription Tab */}
-          <div className="flex items-center px-5 py-2.5 rounded-2xl backdrop-blur-xl bg-white/50 border border-white/40 shadow-sm transition-all duration-500 min-w-[280px] max-w-md w-auto">
+          <div className="flex items-center px-6 py-3 rounded-none bg-white border-4 border-[#121212] shadow-[4px_4px_0px_0px_#121212] transition-all min-w-[300px] max-w-lg w-auto">
             <form onSubmit={sendMessage} className="flex flex-col flex-1 overflow-hidden min-w-0 text-center">
-              <span className="text-[9px] font-bold tracking-wider uppercase text-[#86868b] mb-0.5">
-                {isRecording ? "Listening..." : isPlaying ? "Speaking..." : isLoading ? "Thinking..." : "Assistant"}
+              <span className="text-[10px] font-black tracking-widest uppercase text-[#D02020] mb-0.5">
+                {isRecording ? "LISTENING..." : isPlaying ? "SPEAKING..." : isLoading ? "THINKING..." : "VOICE ASSISTANT"}
               </span>
               
               {isRecording || isPlaying || isLoading ? (
-                <div className="text-[13px] text-[#1d1d1f] font-medium truncate w-full animate-fade-in">
+                <div className="text-sm text-[#121212] font-bold uppercase truncate w-full animate-fade-in">
                   {messages.length > 0 ? messages[messages.length - 1].content : "Processing..."}
                 </div>
               ) : (
@@ -347,9 +360,9 @@ export default function Home() {
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="Tap mic or type here..."
+                  placeholder="TAP MIC OR TYPE HERE..."
                   disabled={isRecording || isPlaying}
-                  className="w-full bg-transparent border-none p-0 m-0 text-[13px] text-center text-[#1d1d1f] font-medium placeholder:text-[#86868b] placeholder:font-normal focus:ring-0 focus:outline-none"
+                  className="w-full bg-transparent border-none p-0 m-0 text-sm text-center text-[#121212] font-bold uppercase placeholder:text-[#121212]/50 focus:ring-0 focus:outline-none"
                 />
               )}
             </form>
