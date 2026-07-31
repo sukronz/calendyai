@@ -24,7 +24,7 @@ export default function Home() {
   const messagesRef = useRef<{ role: string, content: string }[]>([]);
 
   // Silence detection refs
-  const audioContextRef = useRef<AudioContext | null>(null);
+  const recognitionRef = useRef<any>(null);
   const silenceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isRecordingRef = useRef<boolean>(false);
 
@@ -56,48 +56,36 @@ export default function Home() {
       audioChunksRef.current = [];
       isRecordingRef.current = true;
 
-      // Silence Detection Logic
-      const audioContext = new window.AudioContext();
-      audioContextRef.current = audioContext;
-      const source = audioContext.createMediaStreamSource(stream);
-      const analyser = audioContext.createAnalyser();
-      analyser.minDecibels = -60;
-      source.connect(analyser);
+      // Silence Detection using Word Activity
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognitionRef.current = recognition;
 
-      const bufferLength = analyser.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
+        const resetSilenceTimeout = () => {
+          if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
+          silenceTimeoutRef.current = setTimeout(() => {
+            if (isRecordingRef.current) stopRecording();
+          }, 3000); // 3 seconds of silence after the last spoken word
+        };
 
-      const checkSilence = () => {
-        if (!isRecordingRef.current) return;
-
-        analyser.getByteFrequencyData(dataArray);
-        let isSilent = true;
-        for (let i = 0; i < bufferLength; i++) {
-          if (dataArray[i] > 15) { // Amplitude threshold for "speaking"
-            isSilent = false;
-            break;
-          }
+        recognition.onstart = () => resetSilenceTimeout();
+        recognition.onresult = () => resetSilenceTimeout();
+        
+        try {
+          recognition.start();
+        } catch (e) {
+          console.error("Speech recognition failed to start", e);
         }
-
-        if (isSilent) {
-          if (!silenceTimeoutRef.current) {
-            silenceTimeoutRef.current = setTimeout(() => {
-              if (isRecordingRef.current) {
-                stopRecording();
-              }
-            }, 2000); // 2 seconds of silence
-          }
-        } else {
-          if (silenceTimeoutRef.current) {
-            clearTimeout(silenceTimeoutRef.current);
-            silenceTimeoutRef.current = null;
-          }
-        }
-
-        requestAnimationFrame(checkSilence);
-      };
-
-      checkSilence();
+      } else {
+        // Fallback: Just timeout after 5 seconds if word detection isn't supported
+        silenceTimeoutRef.current = setTimeout(() => {
+          if (isRecordingRef.current) stopRecording();
+        }, 5000);
+      }
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -125,9 +113,11 @@ export default function Home() {
       clearTimeout(silenceTimeoutRef.current);
       silenceTimeoutRef.current = null;
     }
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {}
+      recognitionRef.current = null;
     }
 
     if (mediaRecorderRef.current && isRecording) {
@@ -197,7 +187,13 @@ export default function Home() {
         audio.onended = () => {
           isPlayingRef.current = false;
           setIsPlaying(false);
-          processTextQueue();
+          
+          if (textQueueRef.current.length > 0) {
+            processTextQueue();
+          } else {
+            // Auto-resume recording when AI finishes speaking for hands-free mode
+            startRecording();
+          }
         };
       } else {
         isPlayingRef.current = false;
