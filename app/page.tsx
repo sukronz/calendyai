@@ -295,60 +295,65 @@ export default function Home() {
           ></iframe>
         </div>
 
-        {/* Floating Glassmorphic Voice Dock */}
-        <div className={`absolute bottom-12 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 px-3 py-3 rounded-full backdrop-blur-2xl bg-white/65 border border-white/60 shadow-[0_8px_32px_rgba(0,0,0,0.12)] transition-all duration-500 ease-out ${isRecording || isPlaying || isLoading ? "w-[400px]" : "w-[320px]"
-          }`}>
+        {/* Floating Voice Controls */}
+        <div className="absolute bottom-12 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-3 w-full px-4 sm:px-0">
+          
+          {/* Main Voice Dock */}
+          <div className="flex items-center gap-4 px-3 py-3 rounded-full backdrop-blur-2xl bg-white/65 border border-white/60 shadow-[0_8px_32px_rgba(0,0,0,0.12)] transition-all duration-500 ease-out">
+            <button
+              type="button"
+              onClick={isRecording ? stopRecording : startRecording}
+              disabled={isLoading && !isPlaying}
+              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all shadow-sm ${isRecording
+                  ? "bg-red-500 text-white animate-pulse shadow-md shadow-red-500/30"
+                  : isPlaying
+                    ? "bg-[#0071e3] text-white shadow-md shadow-[#0071e3]/30"
+                    : "bg-white text-[#1d1d1f] border border-[#d2d2d7]/50 hover:bg-[#f5f5f7]"
+                } disabled:opacity-50`}
+            >
+              {isRecording ? (
+                <Square className="h-4 w-4 fill-current" />
+              ) : isPlaying ? (
+                <Sparkles className="h-4 w-4" />
+              ) : (
+                <Mic className="h-4 w-4" />
+              )}
+            </button>
 
-          <button
-            type="button"
-            onClick={isRecording ? stopRecording : startRecording}
-            disabled={isLoading && !isPlaying}
-            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all shadow-sm ${isRecording
-                ? "bg-red-500 text-white animate-pulse shadow-md shadow-red-500/30"
-                : isPlaying
-                  ? "bg-[#0071e3] text-white shadow-md shadow-[#0071e3]/30"
-                  : "bg-white text-[#1d1d1f] border border-[#d2d2d7]/50 hover:bg-[#f5f5f7]"
-              } disabled:opacity-50`}
-          >
-            {isRecording ? (
-              <Square className="h-4 w-4 fill-current" />
-            ) : isPlaying ? (
-              <Sparkles className="h-4 w-4" />
-            ) : (
-              <Mic className="h-4 w-4" />
-            )}
-          </button>
-
-          <form onSubmit={sendMessage} className="flex flex-col flex-1 overflow-hidden min-w-0">
-            <span className="text-[10px] font-bold tracking-wider uppercase text-[#86868b] mb-0.5">
-              {isRecording ? "Listening..." : isPlaying ? "Speaking..." : isLoading ? "Thinking..." : "Assistant"}
-            </span>
-
-            {isRecording || isPlaying || isLoading ? (
-              <div className="text-[14px] text-[#1d1d1f] font-medium truncate w-full animate-fade-in">
-                {messages.length > 0 ? messages[messages.length - 1].content : "Processing..."}
+            {isPlaying && (
+              <div className="flex items-center justify-center gap-[3px] h-6 w-8 shrink-0 pr-3">
+                <div className="w-[3px] bg-[#0071e3] rounded-full h-full" style={{ animation: 'waveform 1s ease-in-out infinite 0.1s' }}></div>
+                <div className="w-[3px] bg-[#0071e3] rounded-full h-full" style={{ animation: 'waveform 1.2s ease-in-out infinite 0.3s' }}></div>
+                <div className="w-[3px] bg-[#0071e3] rounded-full h-full" style={{ animation: 'waveform 0.8s ease-in-out infinite 0.0s' }}></div>
+                <div className="w-[3px] bg-[#0071e3] rounded-full h-full" style={{ animation: 'waveform 1.1s ease-in-out infinite 0.4s' }}></div>
+                <div className="w-[3px] bg-[#0071e3] rounded-full h-full" style={{ animation: 'waveform 0.9s ease-in-out infinite 0.2s' }}></div>
               </div>
-            ) : (
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Tap mic or type here..."
-                disabled={isRecording || isPlaying}
-                className="w-full bg-transparent border-none p-0 m-0 text-[14px] text-[#1d1d1f] font-medium placeholder:text-[#86868b] placeholder:font-normal focus:ring-0 focus:outline-none"
-              />
             )}
-          </form>
+          </div>
 
-          {isPlaying && (
-            <div className="flex items-center justify-center gap-[3px] h-6 w-8 shrink-0 pr-3">
-              <div className="w-[3px] bg-[#0071e3] rounded-full h-full" style={{ animation: 'waveform 1s ease-in-out infinite 0.1s' }}></div>
-              <div className="w-[3px] bg-[#0071e3] rounded-full h-full" style={{ animation: 'waveform 1.2s ease-in-out infinite 0.3s' }}></div>
-              <div className="w-[3px] bg-[#0071e3] rounded-full h-full" style={{ animation: 'waveform 0.8s ease-in-out infinite 0.0s' }}></div>
-              <div className="w-[3px] bg-[#0071e3] rounded-full h-full" style={{ animation: 'waveform 1.1s ease-in-out infinite 0.4s' }}></div>
-              <div className="w-[3px] bg-[#0071e3] rounded-full h-full" style={{ animation: 'waveform 0.9s ease-in-out infinite 0.2s' }}></div>
-            </div>
-          )}
+          {/* Secondary Transcription Tab */}
+          <div className="flex items-center px-5 py-2.5 rounded-2xl backdrop-blur-xl bg-white/50 border border-white/40 shadow-sm transition-all duration-500 min-w-[280px] max-w-md w-auto">
+            <form onSubmit={sendMessage} className="flex flex-col flex-1 overflow-hidden min-w-0 text-center">
+              <span className="text-[9px] font-bold tracking-wider uppercase text-[#86868b] mb-0.5">
+                {isRecording ? "Listening..." : isPlaying ? "Speaking..." : isLoading ? "Thinking..." : "Assistant"}
+              </span>
+              
+              {isRecording || isPlaying || isLoading ? (
+                <div className="text-[13px] text-[#1d1d1f] font-medium truncate w-full animate-fade-in">
+                  {messages.length > 0 ? messages[messages.length - 1].content : "Processing..."}
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder="Tap mic or type here..."
+                  disabled={isRecording || isPlaying}
+                  className="w-full bg-transparent border-none p-0 m-0 text-[13px] text-center text-[#1d1d1f] font-medium placeholder:text-[#86868b] placeholder:font-normal focus:ring-0 focus:outline-none"
+                />
+              )}
+            </form>
+          </div>
         </div>
       </main>
     </div>
