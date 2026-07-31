@@ -8,25 +8,26 @@ import { Send, Calendar as CalendarIcon, LogOut, Bot, User, Sparkles, Mic, Squar
 export default function Home() {
   const { data: session, status } = useSession();
   const router = useRouter();
-  
-  const [messages, setMessages] = useState<{role: "user" | "agent", content: string}[]>([
+
+  const [messages, setMessages] = useState<{ role: "user" | "agent", content: string }[]>([
     { role: "agent", content: "Hello! I am your AI scheduling assistant. How can I help you manage your calendar today?" }
   ]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(Date.now());
   const [isRecording, setIsRecording] = useState(false);
-  
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  const chatContainerRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<BlobPart[]>([]);
-  const messagesRef = useRef<{role: string, content: string}[]>([]);
-  
+  const messagesRef = useRef<{ role: string, content: string }[]>([]);
+
   // Silence detection refs
   const audioContextRef = useRef<AudioContext | null>(null);
   const silenceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isRecordingRef = useRef<boolean>(false);
-  
+
   // Audio playback queue refs
   const textQueueRef = useRef<string[]>([]);
   const isPlayingRef = useRef<boolean>(false);
@@ -39,7 +40,12 @@ export default function Home() {
 
   useEffect(() => {
     messagesRef.current = messages;
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTo({
+        top: chatContainerRef.current.scrollHeight,
+        behavior: "smooth"
+      });
+    }
   }, [messages, refreshKey]);
 
   const startRecording = async () => {
@@ -63,7 +69,7 @@ export default function Home() {
 
       const checkSilence = () => {
         if (!isRecordingRef.current) return;
-        
+
         analyser.getByteFrequencyData(dataArray);
         let isSilent = true;
         for (let i = 0; i < bufferLength; i++) {
@@ -87,10 +93,10 @@ export default function Home() {
             silenceTimeoutRef.current = null;
           }
         }
-        
+
         requestAnimationFrame(checkSilence);
       };
-      
+
       checkSilence();
 
       mediaRecorder.ondataavailable = (event) => {
@@ -114,7 +120,7 @@ export default function Home() {
 
   const stopRecording = () => {
     isRecordingRef.current = false;
-    
+
     if (silenceTimeoutRef.current) {
       clearTimeout(silenceTimeoutRef.current);
       silenceTimeoutRef.current = null;
@@ -123,7 +129,7 @@ export default function Home() {
       audioContextRef.current.close();
       audioContextRef.current = null;
     }
-    
+
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
@@ -164,39 +170,44 @@ export default function Home() {
 
   const processTextQueue = async () => {
     if (isPlayingRef.current || textQueueRef.current.length === 0) return;
-    
+
     isPlayingRef.current = true;
+    setIsPlaying(true);
     const text = textQueueRef.current.shift()!;
-    
+
     try {
       const res = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
       });
-      
+
       if (res.ok) {
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
-        
+
         audio.play().catch(e => {
           console.error("Error playing audio:", e);
           isPlayingRef.current = false;
+          setIsPlaying(false);
           processTextQueue();
         });
-        
+
         audio.onended = () => {
           isPlayingRef.current = false;
+          setIsPlaying(false);
           processTextQueue();
         };
       } else {
         isPlayingRef.current = false;
+        setIsPlaying(false);
         processTextQueue();
       }
     } catch (err) {
       console.error("TTS error:", err);
       isPlayingRef.current = false;
+      setIsPlaying(false);
       processTextQueue();
     }
   };
@@ -204,10 +215,10 @@ export default function Home() {
   const executeMessageFlow = async (text: string) => {
     const newUserMsg = { role: "user" as const, content: text };
     const newMsgs = [...messagesRef.current, newUserMsg];
-    
+
     // Update UI
     setMessages(newMsgs);
-    
+
     // Execute API call exactly once
     fetchChatResponse(newMsgs);
   };
@@ -224,7 +235,7 @@ export default function Home() {
       const data = await response.json();
       const reply = data.reply || data.error || "Sorry, I encountered an unexpected error.";
       setMessages((prev) => [...prev, { role: "agent", content: reply }]);
-      
+
       setRefreshKey(Date.now());
       playTTS(reply);
 
@@ -252,16 +263,16 @@ export default function Home() {
   if (!session) return null;
 
   return (
-    <div className="flex h-screen flex-col bg-[#f5f5f7] font-sans antialiased text-[#1d1d1f]">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-[#d2d2d7]/40 bg-[#f5f5f7]/80 backdrop-blur-md px-8 z-20 sticky top-0">
+    <div className="flex h-screen flex-col bg-[#f5f5f7] font-sans antialiased text-[#1d1d1f] overflow-hidden">
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-[#d2d2d7]/40 bg-[#f5f5f7]/80 backdrop-blur-md px-8 z-20 relative">
         <div className="flex items-center gap-2 font-semibold text-lg text-[#1d1d1f] tracking-tight">
           <CalendarIcon className="h-5 w-5 text-[#1d1d1f]" />
           Calendy<span className="text-[#86868b]">AI</span>
         </div>
         <div className="flex items-center gap-6 text-sm font-medium text-[#1d1d1f]">
           <div className="hidden sm:flex items-center gap-2">
-             <div className="h-2 w-2 rounded-full bg-green-500"></div>
-             {session.user?.email}
+            <div className="h-2 w-2 rounded-full bg-green-500"></div>
+            {session.user?.email}
           </div>
           <button
             onClick={() => signOut()}
@@ -273,108 +284,77 @@ export default function Home() {
         </div>
       </header>
 
-      <div className="mx-auto flex w-full max-w-[1400px] flex-1 overflow-hidden p-6 sm:p-8 gap-8">
-        
-        {/* Chat Main Area */}
-        <main className="flex w-full flex-col bg-white rounded-3xl shadow-sm border border-[#d2d2d7]/50 md:w-[55%] overflow-hidden relative z-10">
-          <div className="flex items-center justify-between px-8 py-5 border-b border-[#d2d2d7]/30 bg-white">
-            <h2 className="text-[17px] font-semibold text-[#1d1d1f] tracking-tight flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-[#86868b]" />
-              Scheduling Assistant
-            </h2>
-          </div>
-          
-          <div className="flex-1 overflow-y-auto p-8 bg-white">
-            <div className="flex flex-col gap-6">
-              {messages.map((msg, idx) => (
-                <div key={idx} className={`flex gap-4 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
-                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${msg.role === "user" ? "bg-[#0071e3] text-white" : "bg-[#f5f5f7] text-[#1d1d1f]"}`}>
-                    {msg.role === "user" ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
-                  </div>
-                  <div className={`rounded-2xl px-5 py-3 text-[15px] leading-relaxed max-w-[80%] ${
-                    msg.role === "user" 
-                      ? "bg-[#0071e3] text-white" 
-                      : "bg-[#f5f5f7] text-[#1d1d1f]"
-                  }`}>
-                    {msg.content}
-                  </div>
-                </div>
-              ))}
-              {isLoading && (
-                <div className="flex flex-row gap-4">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f5f5f7] text-[#1d1d1f]">
-                    <Bot className="h-4 w-4" />
-                  </div>
-                  <div className="flex items-center gap-1.5 rounded-2xl bg-[#f5f5f7] px-5 py-4">
-                    <div className="h-2 w-2 animate-bounce rounded-full bg-[#86868b] [animation-delay:-0.3s]"></div>
-                    <div className="h-2 w-2 animate-bounce rounded-full bg-[#86868b] [animation-delay:-0.15s]"></div>
-                    <div className="h-2 w-2 animate-bounce rounded-full bg-[#86868b]"></div>
-                  </div>
-                </div>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-          </div>
+      <main className="flex-1 w-full relative bg-[#f5f5f7] p-16 sm:p-12">
+        {/* Floating Card Calendar */}
+        <div className="w-full h-full bg-white rounded-3xl shadow-sm border border-[#d2d2d7]/70 overflow-hidden relative z-0">
+          <iframe
+            key={refreshKey}
+            src={`https://calendar.google.com/calendar/embed?src=${encodeURIComponent(session.user?.email || "")}&mode=WEEK&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=1&showCalendars=0&showTz=0&wkst=1&bgcolor=%23ffffff`}
+            style={{ borderWidth: 0 }}
+            width="100%"
+            height="100%"
+            frameBorder="0"
+            scrolling="yes"
+            className="w-full h-full"
+          ></iframe>
+        </div>
 
-          <div className="bg-white p-6 border-t border-[#d2d2d7]/30">
-            <form onSubmit={sendMessage} className="relative flex items-center gap-3">
-              <div className="relative flex-1">
-                <input
-                  type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="Ask me to schedule a meeting..."
-                  disabled={isRecording}
-                  className="w-full rounded-full border border-[#d2d2d7] bg-[#f5f5f7] py-3.5 pl-6 pr-14 text-[15px] text-[#1d1d1f] placeholder:text-[#86868b] focus:bg-white focus:border-[#0071e3] focus:ring-1 focus:ring-[#0071e3] focus:outline-none transition-all disabled:opacity-50"
-                />
-                <button
-                  type="submit"
-                  disabled={isLoading || !input.trim() || isRecording}
-                  className="absolute right-2 top-[5px] flex h-9 w-9 items-center justify-center rounded-full bg-[#0071e3] text-white transition-all hover:bg-[#0077ed] disabled:bg-[#d2d2d7] disabled:opacity-50"
-                >
-                  <Send className="h-4 w-4 ml-0.5" />
-                </button>
+        {/* Floating Glassmorphic Voice Dock */}
+        <div className={`absolute bottom-12 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 px-3 py-3 rounded-full backdrop-blur-2xl bg-white/65 border border-white/60 shadow-[0_8px_32px_rgba(0,0,0,0.12)] transition-all duration-500 ease-out ${isRecording || isPlaying || isLoading ? "w-[400px]" : "w-[320px]"
+          }`}>
+
+          <button
+            type="button"
+            onClick={isRecording ? stopRecording : startRecording}
+            disabled={isLoading && !isPlaying}
+            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all shadow-sm ${isRecording
+                ? "bg-red-500 text-white animate-pulse shadow-md shadow-red-500/30"
+                : isPlaying
+                  ? "bg-[#0071e3] text-white shadow-md shadow-[#0071e3]/30"
+                  : "bg-white text-[#1d1d1f] border border-[#d2d2d7]/50 hover:bg-[#f5f5f7]"
+              } disabled:opacity-50`}
+          >
+            {isRecording ? (
+              <Square className="h-4 w-4 fill-current" />
+            ) : isPlaying ? (
+              <Sparkles className="h-4 w-4" />
+            ) : (
+              <Mic className="h-4 w-4" />
+            )}
+          </button>
+
+          <form onSubmit={sendMessage} className="flex flex-col flex-1 overflow-hidden min-w-0">
+            <span className="text-[10px] font-bold tracking-wider uppercase text-[#86868b] mb-0.5">
+              {isRecording ? "Listening..." : isPlaying ? "Speaking..." : isLoading ? "Thinking..." : "Assistant"}
+            </span>
+
+            {isRecording || isPlaying || isLoading ? (
+              <div className="text-[14px] text-[#1d1d1f] font-medium truncate w-full animate-fade-in">
+                {messages.length > 0 ? messages[messages.length - 1].content : "Processing..."}
               </div>
-              
-              <button
-                type="button"
-                onClick={isRecording ? stopRecording : startRecording}
-                disabled={isLoading}
-                className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full transition-all shadow-sm ${
-                  isRecording 
-                    ? "bg-red-500 text-white animate-pulse shadow-md shadow-red-500/30" 
-                    : "bg-[#f5f5f7] text-[#1d1d1f] border border-[#d2d2d7] hover:bg-[#e8e8ed]"
-                } disabled:opacity-50`}
-              >
-                {isRecording ? <Square className="h-5 w-5 fill-current" /> : <Mic className="h-5 w-5" />}
-              </button>
-            </form>
-          </div>
-        </main>
+            ) : (
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Tap mic or type here..."
+                disabled={isRecording || isPlaying}
+                className="w-full bg-transparent border-none p-0 m-0 text-[14px] text-[#1d1d1f] font-medium placeholder:text-[#86868b] placeholder:font-normal focus:ring-0 focus:outline-none"
+              />
+            )}
+          </form>
 
-        {/* Calendar iframe Side Pane */}
-        <aside className="hidden w-[45%] flex-col bg-white rounded-3xl shadow-sm border border-[#d2d2d7]/50 md:flex overflow-hidden relative z-10">
-          <div className="flex items-center justify-between px-8 py-5 border-b border-[#d2d2d7]/30 bg-white">
-            <h2 className="text-[17px] font-semibold text-[#1d1d1f] tracking-tight flex items-center gap-2">
-              <CalendarIcon className="h-5 w-5 text-[#86868b]" /> 
-              This Week
-            </h2>
-          </div>
-          <div className="flex-1 w-full bg-white">
-            <iframe 
-               key={refreshKey}
-               src={`https://calendar.google.com/calendar/embed?src=${encodeURIComponent(session.user?.email || "")}&mode=WEEK&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=1&showCalendars=0&showTz=0&wkst=1&bgcolor=%23ffffff`} 
-               style={{borderWidth:0}} 
-               width="100%" 
-               height="100%" 
-               frameBorder="0" 
-               scrolling="yes"
-               className="w-full h-full"
-            ></iframe>
-          </div>
-        </aside>
-
-      </div>
+          {isPlaying && (
+            <div className="flex items-center justify-center gap-[3px] h-6 w-8 shrink-0 pr-3">
+              <div className="w-[3px] bg-[#0071e3] rounded-full h-full" style={{ animation: 'waveform 1s ease-in-out infinite 0.1s' }}></div>
+              <div className="w-[3px] bg-[#0071e3] rounded-full h-full" style={{ animation: 'waveform 1.2s ease-in-out infinite 0.3s' }}></div>
+              <div className="w-[3px] bg-[#0071e3] rounded-full h-full" style={{ animation: 'waveform 0.8s ease-in-out infinite 0.0s' }}></div>
+              <div className="w-[3px] bg-[#0071e3] rounded-full h-full" style={{ animation: 'waveform 1.1s ease-in-out infinite 0.4s' }}></div>
+              <div className="w-[3px] bg-[#0071e3] rounded-full h-full" style={{ animation: 'waveform 0.9s ease-in-out infinite 0.2s' }}></div>
+            </div>
+          )}
+        </div>
+      </main>
     </div>
   );
 }
