@@ -122,7 +122,7 @@ export default function Home() {
       hasSpokenRef.current = false;
 
       setAgentStage("RECORDING_STT");
-      addLog("stt", "Microphone stream opened. Listening for user input...");
+      addLog("stt", "Mic open, listening...");
 
       // Set up AudioContext + AnalyserNode for RMS-based silence detection
       const audioContext = new window.AudioContext();
@@ -146,10 +146,9 @@ export default function Home() {
       let calibrationSamples: number[] = [];
       let speechThreshold = 0.015; // default fallback
 
-      // Safety: hard max recording time to prevent the "too long" STT error
       maxRecordingTimeoutRef.current = setTimeout(() => {
         if (isRecordingRef.current) {
-          addLog("stt", "Max recording duration reached (55s). Auto-stopping.");
+          addLog("stt", "Max duration reached (55s).");
           stopRecording();
         }
       }, MAX_RECORDING_MS);
@@ -169,7 +168,7 @@ export default function Home() {
         if (calibrationSamples.length > 0) {
           const avgNoise = calibrationSamples.reduce((a, b) => a + b, 0) / calibrationSamples.length;
           speechThreshold = Math.max(avgNoise * NOISE_MULTIPLIER, MIN_THRESHOLD);
-          addLog("stt", `Noise floor calibrated: ${avgNoise.toFixed(4)} RMS → speech threshold: ${speechThreshold.toFixed(4)}`);
+          addLog("stt", `Calibrated: noise=${avgNoise.toFixed(4)}, threshold=${speechThreshold.toFixed(4)}`);
         }
       }, CALIBRATION_MS);
 
@@ -190,7 +189,7 @@ export default function Home() {
           // Sound above noise floor detected — this is speech
           if (!hasSpokenRef.current) {
             hasSpokenRef.current = true;
-            addLog("stt", "User speech detected. Monitoring cadence...");
+            addLog("stt", "Speech detected");
           }
           // Clear any pending silence timeout — user is still speaking
           if (silenceTimeoutRef.current) {
@@ -198,10 +197,9 @@ export default function Home() {
             silenceTimeoutRef.current = null;
           }
         } else if (hasSpokenRef.current && !silenceTimeoutRef.current) {
-          // User has spoken before, and now it's back to noise floor — start countdown
           silenceTimeoutRef.current = setTimeout(() => {
             if (isRecordingRef.current) {
-              addLog("stt", "2s silence threshold reached. Auto-stopping.");
+              addLog("stt", "2s silence, stopping");
               stopRecording();
             }
           }, SILENCE_DURATION_MS);
@@ -218,7 +216,7 @@ export default function Home() {
       };
 
       mediaRecorder.onstop = async () => {
-        addLog("stt", "Microphone stream closed. Processing audio...");
+        addLog("stt", "Processing audio...");
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         await processVoiceInput(audioBlob);
       };
@@ -267,7 +265,7 @@ export default function Home() {
   const processVoiceInput = async (audioBlob: Blob) => {
     setIsLoading(true);
     setAgentStage("THINKING_LLM");
-    addLog("stt", "Uploading WebM audio payload to Google Speech-to-Text (/api/stt)...");
+    addLog("stt", "Uploading to STT...");
 
     try {
       const formData = new FormData();
@@ -280,7 +278,7 @@ export default function Home() {
 
       const sttData = await sttRes.json();
       if (sttData.text) {
-        addLog("stt", `STT Transcription Result: "${sttData.text}"`);
+        addLog("stt", `STT: "${sttData.text}"`);
         await executeMessageFlow(sttData.text);
       } else {
         throw new Error(sttData.error || "Failed to transcribe audio");
@@ -307,7 +305,7 @@ export default function Home() {
     setIsPlaying(true);
     setAgentStage("SYNTHESIZING_TTS");
     const text = textQueueRef.current.shift()!;
-    addLog("tts", "Sending speech text to Google Text-to-Speech (/api/tts)...");
+    addLog("tts", "Synthesizing TTS...");
 
     try {
       const res = await fetch("/api/tts", {
@@ -317,7 +315,7 @@ export default function Home() {
       });
 
       if (res.ok) {
-        addLog("tts", "Received OGG_OPUS audio stream payload. Starting playback.");
+        addLog("tts", "Playing TTS audio");
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
@@ -337,7 +335,7 @@ export default function Home() {
             processTextQueue();
           } else {
             setAgentStage("STANDBY");
-            addLog("info", "Audio playback complete. Re-arming microphone for continuous loop.");
+            addLog("info", "Playback complete, re-arming mic");
             startRecording();
           }
         };
@@ -368,7 +366,7 @@ export default function Home() {
   const fetchChatResponse = async (history: any[]) => {
     setIsLoading(true);
     setAgentStage("THINKING_LLM");
-    addLog("llm", `Invoking Gemini 3.5 Flash Lite with ${history.length} messages in context.`);
+    addLog("llm", `Thinking... (${history.length} msgs)`);
 
     try {
       const response = await fetch("/api/chat", {
@@ -389,13 +387,13 @@ export default function Home() {
           else if (log.tool === "delete_event") toolDescription = "Deleting Calendar Event";
 
           setAgentStage("EXECUTING_TOOL");
-          addLog("tool_call", `[Tool Invoked] ${log.tool}() — ${toolDescription}`, log.args);
-          addLog("tool_result", `[Tool Result] ${log.tool}() completed`, log.result);
+          addLog("tool_call", `${log.tool}() — ${toolDescription}`, log.args);
+          addLog("tool_result", `${log.tool}() done`, log.result);
         });
       }
 
       const reply = data.reply || data.error || "Sorry, I encountered an unexpected error.";
-      addLog("llm", `LLM Response generated: "${reply}"`);
+      addLog("llm", "Response generated");
       setMessages((prev) => [...prev, { role: "agent", content: reply }]);
 
       setRefreshKey(Date.now());
