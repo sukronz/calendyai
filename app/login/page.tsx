@@ -8,19 +8,19 @@ export default function LoginPage() {
       {/* Decorative Bauhaus Background Shapes */}
       <div className="absolute top-12 left-12 h-32 w-32 rounded-full bg-[#D02020] border-4 border-[#121212] opacity-90 hidden sm:block"></div>
       <div className="absolute bottom-16 right-16 h-40 w-40 bg-[#1040C0] border-4 border-[#121212] rotate-12 opacity-90 hidden sm:block"></div>
-      <div 
+      <div
         className="absolute top-1/4 right-20 w-0 h-0 border-l-[60px] border-l-transparent border-r-[60px] border-r-transparent border-b-[100px] border-b-[#F0C020] opacity-90 hidden md:block"
         style={{ filter: "drop-shadow(4px 4px 0px #121212)" }}
       ></div>
 
       {/* Main Constructivist Poster Card */}
       <div className="relative z-10 w-full max-w-lg bg-white border-4 border-[#121212] shadow-[10px_10px_0px_0px_#121212] p-8 sm:p-12 text-center rounded-none">
-        
+
         {/* Geometric Composition Logo */}
         <div className="flex items-center justify-center gap-3 mb-8">
           <div className="h-8 w-8 rounded-full bg-[#D02020] border-2 border-[#121212] shadow-[2px_2px_0px_0px_#121212]"></div>
           <div className="h-8 w-8 rounded-none bg-[#1040C0] border-2 border-[#121212] shadow-[2px_2px_0px_0px_#121212]"></div>
-          <div 
+          <div
             className="w-0 h-0 border-l-[16px] border-l-transparent border-r-[16px] border-r-transparent border-b-[28px] border-b-[#F0C020]"
             style={{ filter: "drop-shadow(2px 2px 0px #121212)" }}
           ></div>
@@ -29,7 +29,7 @@ export default function LoginPage() {
         <h1 className="text-4xl sm:text-6xl font-black uppercase tracking-tighter text-[#121212] leading-[0.9] mb-4">
           CALENDY<span className="text-[#D02020]">.AI</span>
         </h1>
-        
+
         <div className="inline-block bg-[#F0C020] border-2 border-[#121212] px-3 py-1 mb-6 shadow-[3px_3px_0px_0px_#121212]">
           <span className="text-xs font-black uppercase tracking-widest text-[#121212]">
             VOICE SCHEDULING ASSISTANT
@@ -39,7 +39,7 @@ export default function LoginPage() {
         <p className="mb-8 text-base font-medium text-[#121212] leading-relaxed">
           Connect your Google Calendar to unlock effortless, hands-free intelligent voice scheduling. Form follows function.
         </p>
-        
+
         <button
           onClick={() => signIn("google", { callbackUrl: "/" })}
           className="flex w-full items-center justify-center gap-3 bg-[#F0C020] hover:bg-[#e0b010] text-[#121212] font-black uppercase tracking-wider text-sm px-6 py-4 border-4 border-[#121212] shadow-[6px_6px_0px_0px_#121212] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all rounded-none cursor-pointer"
@@ -67,8 +67,7 @@ export default function LoginPage() {
 
         {/* Footer Accent */}
         <div className="mt-8 pt-4 border-t-2 border-[#121212] flex items-center justify-between text-[10px] font-bold tracking-widest uppercase text-[#121212]">
-          <span>BAUHAUS EDITION</span>
-          <span>EST. 2026</span>
+
         </div>
       </div>
     </div>

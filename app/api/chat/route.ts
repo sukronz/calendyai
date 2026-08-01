@@ -150,6 +150,8 @@ export async function POST(req: Request) {
     // Send the user's latest message
     let result = await chat.sendMessage([{ text: latestMessage }]);
 
+    const toolLogs: { tool: string; args: any; result: any; timestamp: string }[] = [];
+
     // Check if the model wants to call a function
     let calls = result.response.functionCalls();
     while (calls && calls.length > 0) {
@@ -161,11 +163,11 @@ export async function POST(req: Request) {
         if (call.name === "list_events") {
           const args = call.args as any;
           const events = await listEvents(session, args.timeMin, args.timeMax);
-          functionResult = { events };
+          functionResult = { eventsCount: events.length, events };
         } else if (call.name === "create_event") {
           const args = call.args as any;
           const event = await createEvent(session, args.title, args.startTime, args.endTime, args.attendees);
-          functionResult = { status: "success", event };
+          functionResult = { status: "success", eventId: event.id, summary: event.summary };
         } else if (call.name === "delete_event") {
           const args = call.args as any;
           const result = await deleteEvent(session, args.eventId);
@@ -173,7 +175,7 @@ export async function POST(req: Request) {
         } else if (call.name === "update_event") {
           const args = call.args as any;
           const event = await updateEvent(session, args.eventId, args.title, args.startTime, args.endTime, args.attendees);
-          functionResult = { status: "success", event };
+          functionResult = { status: "success", eventId: event.id, summary: event.summary };
         } else {
           functionResult = { error: "Unknown function" };
         }
@@ -181,6 +183,13 @@ export async function POST(req: Request) {
         console.error(`[Gemini] Function ${call.name} error:`, err.message);
         functionResult = { error: err.message };
       }
+
+      toolLogs.push({
+        tool: call.name,
+        args: call.args,
+        result: functionResult,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      });
 
       console.log(`[Gemini] Sending function response back:`, functionResult);
 
@@ -206,7 +215,7 @@ export async function POST(req: Request) {
       console.log("[Gemini] Empty response received. Full response object:", JSON.stringify(result.response, null, 2));
     }
 
-    return NextResponse.json({ reply: replyText });
+    return NextResponse.json({ reply: replyText, toolLogs });
   } catch (error: any) {
     console.error("Chat API error:", error);
 

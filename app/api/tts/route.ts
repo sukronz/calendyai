@@ -18,7 +18,7 @@ export async function POST(req: Request) {
       body: JSON.stringify({
         input: { text },
         voice: { languageCode: "en-US", name: "en-US-Journey-F" }, // High quality Google Journey voice
-        audioConfig: { audioEncoding: "MP3" }
+        audioConfig: { audioEncoding: "OGG_OPUS" }
       })
     });
 
@@ -31,7 +31,7 @@ export async function POST(req: Request) {
 
     return new NextResponse(audioBuffer, {
       headers: {
-        "Content-Type": "audio/mpeg",
+        "Content-Type": "audio/ogg",
       },
     });
   } catch (error: any) {
