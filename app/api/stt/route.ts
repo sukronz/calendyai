@@ -23,7 +23,9 @@ export async function POST(req: Request) {
       body: JSON.stringify({
         config: {
           encoding: "WEBM_OPUS",
+          sampleRateHertz: 48000,
           languageCode: "en-US",
+          enableAutomaticPunctuation: true,
         },
         audio: {
           content: base64Audio

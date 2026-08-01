@@ -67,12 +67,13 @@ export default function Home() {
   const messagesRef = useRef<{ role: "user" | "agent", content: string }[]>([]);
 
   // Silence detection refs
-  const recognitionRef = useRef<any>(null);
   const silenceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const maxRecordingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isRecordingRef = useRef<boolean>(false);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
   const hasSpokenRef = useRef<boolean>(false);
-  const browserTranscriptRef = useRef<string>("");
+  const silenceCheckIntervalRef = useRef<number | null>(null);
 
   // Audio playback queue refs
   const textQueueRef = useRef<string[]>([]);
@@ -119,99 +120,96 @@ export default function Home() {
       audioChunksRef.current = [];
       isRecordingRef.current = true;
       hasSpokenRef.current = false;
-      browserTranscriptRef.current = "";
 
       setAgentStage("RECORDING_STT");
       addLog("stt", "Microphone stream opened. Listening for user input...");
 
-      // Hybrid Silence Detection
+      // Set up AudioContext + AnalyserNode for RMS-based silence detection
       const audioContext = new window.AudioContext();
       audioContextRef.current = audioContext;
       const source = audioContext.createMediaStreamSource(stream);
       const analyser = audioContext.createAnalyser();
-      analyser.minDecibels = -60;
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.3;
       source.connect(analyser);
-      const bufferLength = analyser.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
+      analyserRef.current = analyser;
 
-      const startSilenceCountdown = () => {
-        if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
-        silenceTimeoutRef.current = setTimeout(() => {
-          if (isRecordingRef.current) stopRecording();
-        }, 2000);
+      const dataArray = new Float32Array(analyser.fftSize);
+      const SILENCE_DURATION_MS = 2000;
+      const MAX_RECORDING_MS = 55000; // Hard cap to avoid Google STT >1min error
+      const CALIBRATION_MS = 500; // Measure ambient noise for this long
+      const NOISE_MULTIPLIER = 3.0; // Speech must be Nx louder than noise floor
+      const MIN_THRESHOLD = 0.008; // Absolute minimum so dead silence still works
+
+      // --- Adaptive noise floor calibration ---
+      let isCalibrating = true;
+      let calibrationSamples: number[] = [];
+      let speechThreshold = 0.015; // default fallback
+
+      // Safety: hard max recording time to prevent the "too long" STT error
+      maxRecordingTimeoutRef.current = setTimeout(() => {
+        if (isRecordingRef.current) {
+          addLog("stt", "Max recording duration reached (55s). Auto-stopping.");
+          stopRecording();
+        }
+      }, MAX_RECORDING_MS);
+
+      const getRMS = (): number => {
+        analyser.getFloatTimeDomainData(dataArray);
+        let sumSquares = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sumSquares += dataArray[i] * dataArray[i];
+        }
+        return Math.sqrt(sumSquares / dataArray.length);
       };
 
-      const checkVolume = () => {
+      // End calibration after CALIBRATION_MS
+      const calibrationTimer = setTimeout(() => {
+        isCalibrating = false;
+        if (calibrationSamples.length > 0) {
+          const avgNoise = calibrationSamples.reduce((a, b) => a + b, 0) / calibrationSamples.length;
+          speechThreshold = Math.max(avgNoise * NOISE_MULTIPLIER, MIN_THRESHOLD);
+          addLog("stt", `Noise floor calibrated: ${avgNoise.toFixed(4)} RMS → speech threshold: ${speechThreshold.toFixed(4)}`);
+        }
+      }, CALIBRATION_MS);
+
+      // Silence detection using setInterval (more reliable than requestAnimationFrame
+      // which can throttle in background tabs)
+      const checkSilence = () => {
         if (!isRecordingRef.current) return;
-        analyser.getByteFrequencyData(dataArray);
-        let isLoud = false;
-        for (let i = 0; i < bufferLength; i++) {
-          if (dataArray[i] > 30) {
-            isLoud = true;
-            break;
-          }
+
+        const rms = getRMS();
+
+        // During calibration, just collect ambient noise samples
+        if (isCalibrating) {
+          calibrationSamples.push(rms);
+          return;
         }
 
-        if (isLoud) {
+        if (rms > speechThreshold) {
+          // Sound above noise floor detected — this is speech
           if (!hasSpokenRef.current) {
             hasSpokenRef.current = true;
             addLog("stt", "User speech detected. Monitoring cadence...");
           }
+          // Clear any pending silence timeout — user is still speaking
           if (silenceTimeoutRef.current) {
             clearTimeout(silenceTimeoutRef.current);
             silenceTimeoutRef.current = null;
           }
-        } else if (hasSpokenRef.current) {
-          if (!silenceTimeoutRef.current) {
-            startSilenceCountdown();
-          }
+        } else if (hasSpokenRef.current && !silenceTimeoutRef.current) {
+          // User has spoken before, and now it's back to noise floor — start countdown
+          silenceTimeoutRef.current = setTimeout(() => {
+            if (isRecordingRef.current) {
+              addLog("stt", "2s silence threshold reached. Auto-stopping.");
+              stopRecording();
+            }
+          }, SILENCE_DURATION_MS);
         }
-        requestAnimationFrame(checkVolume);
       };
-      checkVolume();
 
-      // SpeechRecognition reinforcement
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      if (SpeechRecognition) {
-        const recognition = new SpeechRecognition();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = "en-US";
-        recognitionRef.current = recognition;
-
-        recognition.onresult = (event: any) => {
-          hasSpokenRef.current = true;
-          let transcript = "";
-          for (let i = 0; i < event.results.length; i++) {
-            transcript += event.results[i][0].transcript;
-          }
-          browserTranscriptRef.current = transcript;
-
-          if (silenceTimeoutRef.current) {
-            clearTimeout(silenceTimeoutRef.current);
-            silenceTimeoutRef.current = null;
-          }
-          startSilenceCountdown();
-        };
-
-        recognition.onend = () => {
-          if (isRecordingRef.current) {
-            try { recognition.start(); } catch (e) { }
-          }
-        };
-
-        recognition.onerror = (event: any) => {
-          if (event.error !== "no-speech") {
-            console.error("Speech recognition error:", event.error);
-          }
-        };
-
-        try {
-          recognition.start();
-        } catch (e) {
-          console.error("Speech recognition failed to start", e);
-        }
-      }
+      // Check every 100ms
+      silenceCheckIntervalRef.current = window.setInterval(checkSilence, 100);
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -220,7 +218,7 @@ export default function Home() {
       };
 
       mediaRecorder.onstop = async () => {
-        addLog("stt", "2s silence threshold reached. Closing microphone stream.");
+        addLog("stt", "Microphone stream closed. Processing audio...");
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         await processVoiceInput(audioBlob);
       };
@@ -237,20 +235,29 @@ export default function Home() {
   const stopRecording = () => {
     isRecordingRef.current = false;
 
+    // Clear all timers
     if (silenceTimeoutRef.current) {
       clearTimeout(silenceTimeoutRef.current);
       silenceTimeoutRef.current = null;
     }
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch (e) { }
-      recognitionRef.current = null;
+    if (maxRecordingTimeoutRef.current) {
+      clearTimeout(maxRecordingTimeoutRef.current);
+      maxRecordingTimeoutRef.current = null;
     }
+    if (silenceCheckIntervalRef.current) {
+      clearInterval(silenceCheckIntervalRef.current);
+      silenceCheckIntervalRef.current = null;
+    }
+
+    // Close audio context
     if (audioContextRef.current) {
       try { audioContextRef.current.close(); } catch (e) { }
       audioContextRef.current = null;
     }
+    analyserRef.current = null;
 
-    if (mediaRecorderRef.current && isRecording) {
+    // Stop media recorder — use the recorder's state, not React state (which can be stale)
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       mediaRecorderRef.current.stop();
       mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
       setIsRecording(false);
@@ -272,20 +279,17 @@ export default function Home() {
       });
 
       const sttData = await sttRes.json();
-      if (sttData.text && sttData.text.trim()) {
+      if (sttData.text) {
         addLog("stt", `STT Transcription Result: "${sttData.text}"`);
         await executeMessageFlow(sttData.text);
       } else {
-        // Quiet audio / no speech detected
-        setIsLoading(false);
-        setAgentStage("STANDBY");
-        setTimeout(() => startRecording(), 100);
+        throw new Error(sttData.error || "Failed to transcribe audio");
       }
     } catch (err: any) {
       console.error("STT error:", err);
+      setMessages((prev) => [...prev, { role: "agent", content: "Sorry, I couldn't understand the audio." }]);
       setIsLoading(false);
       setAgentStage("STANDBY");
-      setTimeout(() => startRecording(), 100);
     }
   };
 
@@ -513,14 +517,14 @@ export default function Home() {
                 </span>
               </div>
               <span className={`text-xs font-mono font-black uppercase tracking-widest px-2.5 py-0.5 rounded-none border border-white/20 ${agentStage === "RECORDING_STT"
-                  ? "bg-[#D02020] text-white animate-pulse"
-                  : agentStage === "THINKING_LLM"
-                    ? "bg-[#F0C020] text-[#121212]"
-                    : agentStage === "EXECUTING_TOOL"
-                      ? "bg-[#1040C0] text-white"
-                      : agentStage === "SYNTHESIZING_TTS"
-                        ? "bg-purple-600 text-white"
-                        : "bg-green-600 text-white"
+                ? "bg-[#D02020] text-white animate-pulse"
+                : agentStage === "THINKING_LLM"
+                  ? "bg-[#F0C020] text-[#121212]"
+                  : agentStage === "EXECUTING_TOOL"
+                    ? "bg-[#1040C0] text-white"
+                    : agentStage === "SYNTHESIZING_TTS"
+                      ? "bg-purple-600 text-white"
+                      : "bg-green-600 text-white"
                 }`}>
                 {agentStage}
               </span>
@@ -547,11 +551,11 @@ export default function Home() {
                     <div className="flex items-center gap-2 text-[10px] text-white/40">
                       <span>[{log.timestamp}]</span>
                       <span className={`font-bold uppercase ${log.stage === "stt" ? "text-yellow-400" :
-                          log.stage === "llm" ? "text-cyan-400" :
-                            log.stage === "tool_call" ? "text-pink-400 font-black" :
-                              log.stage === "tool_result" ? "text-green-400 font-black" :
-                                log.stage === "tts" ? "text-purple-400" :
-                                  log.stage === "error" ? "text-red-500 font-bold" : "text-gray-300"
+                        log.stage === "llm" ? "text-cyan-400" :
+                          log.stage === "tool_call" ? "text-pink-400 font-black" :
+                            log.stage === "tool_result" ? "text-green-400 font-black" :
+                              log.stage === "tts" ? "text-purple-400" :
+                                log.stage === "error" ? "text-red-500 font-bold" : "text-gray-300"
                         }`}>
                         [{log.stage.toUpperCase()}]
                       </span>
@@ -585,10 +589,10 @@ export default function Home() {
               onClick={isRecording ? stopRecording : startRecording}
               disabled={isLoading && !isPlaying}
               className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-none border-2 border-[#121212] transition-all shadow-[3px_3px_0px_0px_#121212] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer ${isRecording
-                  ? "bg-[#D02020] text-white animate-pulse"
-                  : isPlaying
-                    ? "bg-[#1040C0] text-white"
-                    : "bg-white text-[#121212] hover:bg-[#F0F0F0]"
+                ? "bg-[#D02020] text-white animate-pulse"
+                : isPlaying
+                  ? "bg-[#1040C0] text-white"
+                  : "bg-white text-[#121212] hover:bg-[#F0F0F0]"
                 } disabled:opacity-50`}
             >
               {isRecording ? (
