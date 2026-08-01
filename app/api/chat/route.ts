@@ -134,10 +134,13 @@ export async function POST(req: Request) {
     const latestMessage = messages[messages.length - 1].content;
     const previousMessages = messages.slice(0, -1);
 
-    const history = previousMessages.map((msg: any) => ({
-      role: msg.role === "agent" ? "model" : "user",
-      parts: [{ text: msg.content }]
-    }));
+    // Strictly sanitize history roles to only 'user' or 'model'
+    const history = previousMessages
+      .filter((msg: any) => msg.role === "user" || msg.role === "agent")
+      .map((msg: any) => ({
+        role: msg.role === "agent" ? "model" : "user",
+        parts: [{ text: String(msg.content) }]
+      }));
 
     // Gemini requires the first message in history to be from the user.
     if (history.length > 0 && history[0].role === "model") {
@@ -145,7 +148,7 @@ export async function POST(req: Request) {
     }
 
     const model = genAI.getGenerativeModel({
-      model: "gemini-3.5-flash-lite",
+      model: "gemini-2.0-flash-lite-preview-02-05",
       tools: [{ functionDeclarations: [listEventsFunction, createEventFunction, deleteEventFunction, updateEventFunction] }],
       systemInstruction: systemInstruction,
     });
