@@ -280,7 +280,6 @@ export default function Home() {
       }
     } catch (err: any) {
       console.error("STT error:", err);
-      addLog("error", `STT Error: ${err.message}`);
       setMessages((prev) => [...prev, { role: "agent", content: "Sorry, I couldn't understand the audio." }]);
       setIsLoading(false);
       setAgentStage("STANDBY");
