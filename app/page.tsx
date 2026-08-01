@@ -3,21 +3,21 @@
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
-import { 
-  Send, 
-  Calendar as CalendarIcon, 
-  LogOut, 
-  Sparkles, 
-  Mic, 
-  Square, 
-  Terminal, 
-  Cpu, 
-  Trash2, 
-  Wrench, 
-  CheckCircle2, 
-  Clock, 
-  Volume2, 
-  Activity 
+import {
+  Send,
+  Calendar as CalendarIcon,
+  LogOut,
+  Sparkles,
+  Mic,
+  Square,
+  Terminal,
+  Cpu,
+  Trash2,
+  Wrench,
+  CheckCircle2,
+  Clock,
+  Volume2,
+  Activity
 } from "lucide-react";
 
 interface AgentLog {
@@ -196,7 +196,7 @@ export default function Home() {
 
         recognition.onend = () => {
           if (isRecordingRef.current) {
-            try { recognition.start(); } catch (e) {}
+            try { recognition.start(); } catch (e) { }
           }
         };
 
@@ -242,11 +242,11 @@ export default function Home() {
       silenceTimeoutRef.current = null;
     }
     if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch (e) {}
+      try { recognitionRef.current.stop(); } catch (e) { }
       recognitionRef.current = null;
     }
     if (audioContextRef.current) {
-      try { audioContextRef.current.close(); } catch (e) {}
+      try { audioContextRef.current.close(); } catch (e) { }
       audioContextRef.current = null;
     }
 
@@ -326,7 +326,7 @@ export default function Home() {
         audio.onended = () => {
           isPlayingRef.current = false;
           setIsPlaying(false);
-          
+
           if (textQueueRef.current.length > 0) {
             processTextQueue();
           } else {
@@ -457,7 +457,7 @@ export default function Home() {
       {/* Main Canvas Split into Compact Calendar + Agent Inspector */}
       <main className="flex-1 w-full relative bg-[#F0F0F0] p-4 sm:p-6 overflow-y-auto">
         <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 items-start pb-28">
-          
+
           {/* Column 1: Compact Google Calendar Frame (7 Cols) */}
           <div className="lg:col-span-7 flex flex-col space-y-3">
             <div className="flex items-center justify-between border-b-2 border-[#121212] pb-2">
@@ -492,7 +492,7 @@ export default function Home() {
                 <Terminal className="h-4 w-4 text-[#1040C0]" />
                 <span>AGENT TOOL & TELEMETRY INSPECTOR</span>
               </div>
-              <button 
+              <button
                 onClick={() => setLogs([])}
                 className="text-[10px] font-bold uppercase tracking-widest bg-white hover:bg-gray-100 border-2 border-[#121212] px-2 py-0.5 shadow-[2px_2px_0px_0px_#121212] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none cursor-pointer flex items-center gap-1"
                 title="Clear Logs"
@@ -510,24 +510,23 @@ export default function Home() {
                   STAGE:
                 </span>
               </div>
-              <span className={`text-xs font-mono font-black uppercase tracking-widest px-2.5 py-0.5 rounded-none border border-white/20 ${
-                agentStage === "RECORDING_STT"
+              <span className={`text-xs font-mono font-black uppercase tracking-widest px-2.5 py-0.5 rounded-none border border-white/20 ${agentStage === "RECORDING_STT"
                   ? "bg-[#D02020] text-white animate-pulse"
                   : agentStage === "THINKING_LLM"
-                  ? "bg-[#F0C020] text-[#121212]"
-                  : agentStage === "EXECUTING_TOOL"
-                  ? "bg-[#1040C0] text-white"
-                  : agentStage === "SYNTHESIZING_TTS"
-                  ? "bg-purple-600 text-white"
-                  : "bg-green-600 text-white"
-              }`}>
+                    ? "bg-[#F0C020] text-[#121212]"
+                    : agentStage === "EXECUTING_TOOL"
+                      ? "bg-[#1040C0] text-white"
+                      : agentStage === "SYNTHESIZING_TTS"
+                        ? "bg-purple-600 text-white"
+                        : "bg-green-600 text-white"
+                }`}>
                 {agentStage}
               </span>
             </div>
 
             {/* Claude Code Style Terminal Output Box */}
             <div className="w-full h-[400px] bg-[#121212] border-4 border-[#121212] shadow-[8px_8px_0px_0px_#121212] p-4 font-mono text-xs overflow-hidden flex flex-col justify-between">
-              
+
               {/* Window Controls Header */}
               <div className="flex items-center justify-between border-b border-white/20 pb-2 mb-3 text-[10px] text-white/50 uppercase tracking-widest shrink-0">
                 <div className="flex items-center gap-1.5">
@@ -545,14 +544,13 @@ export default function Home() {
                   <div key={log.id} className="text-left leading-relaxed border-l-2 pl-2.5 py-0.5 border-white/15">
                     <div className="flex items-center gap-2 text-[10px] text-white/40">
                       <span>[{log.timestamp}]</span>
-                      <span className={`font-bold uppercase ${
-                        log.stage === "stt" ? "text-yellow-400" :
-                        log.stage === "llm" ? "text-cyan-400" :
-                        log.stage === "tool_call" ? "text-pink-400 font-black" :
-                        log.stage === "tool_result" ? "text-green-400 font-black" :
-                        log.stage === "tts" ? "text-purple-400" :
-                        log.stage === "error" ? "text-red-500 font-bold" : "text-gray-300"
-                      }`}>
+                      <span className={`font-bold uppercase ${log.stage === "stt" ? "text-yellow-400" :
+                          log.stage === "llm" ? "text-cyan-400" :
+                            log.stage === "tool_call" ? "text-pink-400 font-black" :
+                              log.stage === "tool_result" ? "text-green-400 font-black" :
+                                log.stage === "tts" ? "text-purple-400" :
+                                  log.stage === "error" ? "text-red-500 font-bold" : "text-gray-300"
+                        }`}>
                         [{log.stage.toUpperCase()}]
                       </span>
                     </div>
@@ -577,15 +575,14 @@ export default function Home() {
 
         {/* Bauhaus Floating Voice Controls */}
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-3 w-full px-4 sm:px-0 max-w-lg">
-          
+
           {/* Main Voice Dock */}
           <div className="flex items-center gap-4 px-4 py-3 rounded-none bg-[#F0C020] border-4 border-[#121212] shadow-[6px_6px_0px_0px_#121212] transition-all">
             <button
               type="button"
               onClick={isRecording ? stopRecording : startRecording}
               disabled={isLoading && !isPlaying}
-              className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-none border-2 border-[#121212] transition-all shadow-[3px_3px_0px_0px_#121212] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer ${
-                isRecording
+              className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-none border-2 border-[#121212] transition-all shadow-[3px_3px_0px_0px_#121212] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer ${isRecording
                   ? "bg-[#D02020] text-white animate-pulse"
                   : isPlaying
                     ? "bg-[#1040C0] text-white"
@@ -618,7 +615,7 @@ export default function Home() {
               <span className="text-[10px] font-black tracking-widest uppercase text-[#D02020] mb-0.5">
                 {isRecording ? "LISTENING..." : isPlaying ? "SPEAKING..." : isLoading ? "THINKING..." : "VOICE ASSISTANT"}
               </span>
-              
+
               {isRecording || isPlaying || isLoading ? (
                 <div className="text-sm text-[#121212] font-bold uppercase truncate w-full animate-fade-in">
                   {messages.length > 0 ? messages[messages.length - 1].content : "Processing..."}
