@@ -272,17 +272,20 @@ export default function Home() {
       });
 
       const sttData = await sttRes.json();
-      if (sttData.text) {
+      if (sttData.text && sttData.text.trim()) {
         addLog("stt", `STT Transcription Result: "${sttData.text}"`);
         await executeMessageFlow(sttData.text);
       } else {
-        throw new Error(sttData.error || "Failed to transcribe audio");
+        // Quiet audio / no speech detected
+        setIsLoading(false);
+        setAgentStage("STANDBY");
+        setTimeout(() => startRecording(), 100);
       }
     } catch (err: any) {
       console.error("STT error:", err);
-      setMessages((prev) => [...prev, { role: "agent", content: "Sorry, I couldn't understand the audio." }]);
       setIsLoading(false);
       setAgentStage("STANDBY");
+      setTimeout(() => startRecording(), 100);
     }
   };
 
