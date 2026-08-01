@@ -375,10 +375,16 @@ export default function Home() {
 
       // Log tool call telemetry if tools were executed
       if (data.toolLogs && data.toolLogs.length > 0) {
-        setAgentStage("EXECUTING_TOOL");
         data.toolLogs.forEach((log: any) => {
-          addLog("tool_call", `[Tool Invoked] ${log.tool}()`, log.args);
-          addLog("tool_result", `[Tool Result] ${log.tool}`, log.result);
+          let toolDescription = "Calendar Tool Execution";
+          if (log.tool === "list_events") toolDescription = "Checking Schedule & Conflict Detection";
+          else if (log.tool === "create_event") toolDescription = "Booking New Calendar Event";
+          else if (log.tool === "update_event") toolDescription = "Updating Existing Calendar Event";
+          else if (log.tool === "delete_event") toolDescription = "Deleting Calendar Event";
+
+          setAgentStage("EXECUTING_TOOL");
+          addLog("tool_call", `[Tool Invoked] ${log.tool}() — ${toolDescription}`, log.args);
+          addLog("tool_result", `[Tool Result] ${log.tool}() completed`, log.result);
         });
       }
 
