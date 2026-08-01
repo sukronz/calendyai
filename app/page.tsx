@@ -55,7 +55,7 @@ export default function Home() {
     {
       id: "init-2",
       stage: "info",
-      message: "Services online: Google STT, Gemini 3.1 Flash Lite, Google Calendar API Tools, Google TTS.",
+      message: "Services online: Google STT, Gemini 3.5 Flash Lite, Google Calendar API Tools, Google TTS.",
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     }
   ]);
@@ -362,7 +362,7 @@ export default function Home() {
   const fetchChatResponse = async (history: any[]) => {
     setIsLoading(true);
     setAgentStage("THINKING_LLM");
-    addLog("llm", `Invoking Gemini 3.1 Flash Lite with ${history.length} messages in context.`);
+    addLog("llm", `Invoking Gemini 3.5 Flash Lite with ${history.length} messages in context.`);
 
     try {
       const response = await fetch("/api/chat", {

@@ -145,7 +145,7 @@ export async function POST(req: Request) {
     }
 
     const model = genAI.getGenerativeModel({
-      model: "gemini-3.1-flash-lite",
+      model: "gemini-3.5-flash-lite",
       tools: [{ functionDeclarations: [listEventsFunction, createEventFunction, deleteEventFunction, updateEventFunction] }],
       systemInstruction: systemInstruction,
     });
