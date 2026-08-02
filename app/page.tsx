@@ -387,8 +387,8 @@ export default function Home() {
           else if (log.tool === "delete_event") toolDescription = "Deleting Calendar Event";
 
           setAgentStage("EXECUTING_TOOL");
-          addLog("tool_call", `${log.tool}() — ${toolDescription}`, log.args);
-          addLog("tool_result", `${log.tool}() done`, log.result);
+          addLog("tool_call", `${log.tool} called — ${toolDescription}`);
+          addLog("tool_result", `${log.tool} finished`);
         });
       }
 
@@ -559,15 +559,17 @@ export default function Home() {
                       </span>
                     </div>
                     <div className="text-white/90 text-[11px] font-medium break-words mt-0.5">
-                      {log.message}
+                      {log.stage.startsWith("tool_") ? (
+                        <>
+                          <span className="text-pink-300 font-bold bg-pink-500/20 px-1 py-0.5 rounded-sm mr-1 border border-pink-500/30">
+                            {log.message.split(" ")[0]}
+                          </span>
+                          {log.message.substring(log.message.indexOf(" ") + 1)}
+                        </>
+                      ) : (
+                        log.message
+                      )}
                     </div>
-
-                    {/* Formatted Payload Code Block for Tool Calls */}
-                    {log.payload && (
-                      <pre className="bg-black/70 text-green-400 p-2 mt-1 rounded-none border border-white/10 text-[10px] overflow-x-auto whitespace-pre-wrap font-mono">
-                        {JSON.stringify(log.payload, null, 2)}
-                      </pre>
-                    )}
                   </div>
                 ))}
               </div>
