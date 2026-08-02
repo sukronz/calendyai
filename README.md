@@ -226,4 +226,21 @@ The dashboard includes a Claude Code-style **Agent Tool & Telemetry Inspector** 
 | **Text-to-Speech** | Google Cloud Text-to-Speech (OGG_OPUS) | Synthesizes response text into spoken audio |
 | **Styling** | Tailwind CSS v4 | Utility-first CSS |
 | **Containerization** | Docker + Google Cloud Run | Serverless production deployment |
-| **Silence Detection** | Hybrid (AudioContext + `webkitSpeechRecognition`) | 2-second volume & word activity pause detection |
+| **Silence Detection** | Adaptive RMS AudioContext | Dynamic ambient noise calibration for pause detection |
+
+---
+
+## Design Decisions & How the Agent Works
+
+### 1. The Agent's Logic (How it Works)
+The core of CalendyAI is an autonomous agent powered by Gemini 3.5 Flash Lite. Unlike simple chatbots, this agent operates in a loop of observation and action:
+- **Mandatory Conflict Checking**: The agent is explicitly instructed via its system prompt to always use the `list_events` tool before attempting to book a meeting. This ensures it maps out your day accurately.
+- **Advanced Conflict Resolution**: If a requested slot is occupied, the agent doesn't fail or blindly book. It calculates the next earliest free slot outside existing event boundaries and dynamically pivots to suggest an alternative time (e.g., "Tuesday is full, how about Wednesday at 10 AM?").
+- **Smarter Time Parsing**: The agent contextually maps relative requests like "sometime late next week" or "an hour before my 5 PM meeting" into precise ISO-8601 datetimes.
+- **Adaptive Voice Detection**: Rather than relying on rigid decibel thresholds, the app calibrates to your room's ambient noise floor during the first 500ms of recording. It then sets a dynamic threshold, ensuring background noise (like fans or AC) doesn't interrupt the silence-detection auto-stop.
+
+### 2. High-Contrast "Newsprint" UI Design
+The interface intentionally avoids soft shadows and rounded corners. Instead, it employs a bold, high-contrast Bauhaus/Newsprint design aesthetic:
+- **Zero Border Radius**: Every element uses sharp, hard edges.
+- **Primary Colors**: Stark black and white with high-visibility accents (Red, Yellow, Blue).
+- **Telemetry Transparency**: The "Agent Inspector" exposes the raw LLM tool calls directly to the user. Rather than hiding the AI in a black box, it builds trust by showing exactly what the AI is thinking and executing in real-time.
