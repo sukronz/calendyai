@@ -131,6 +131,17 @@ calendyai/
 
 ### System Overview
 
+## Design Decisions & How the Agent Works
+
+### 1. The Agent's Logic (How it Works)
+The core of CalendyAI is an autonomous agent powered by Gemini 3.5 Flash Lite. Unlike simple chatbots, this agent operates in a loop of observation and action:
+- **Mandatory Conflict Checking**: The agent is explicitly instructed via its system prompt to always use the `list_events` tool before attempting to book a meeting. This ensures it maps out your day accurately.
+- **Advanced Conflict Resolution**: If a requested slot is occupied, the agent doesn't fail or blindly book. It calculates the next earliest free slot outside existing event boundaries and dynamically pivots to suggest an alternative time (e.g., "Tuesday is full, how about Wednesday at 10 AM?").
+- **Smarter Time Parsing**: The agent contextually maps relative requests like "sometime late next week" or "an hour before my 5 PM meeting" into precise ISO-8601 datetimes.
+- **Adaptive Voice Detection**: Rather than relying on rigid decibel thresholds, the app calibrates to your room's ambient noise floor during the first 500ms of recording. It then sets a dynamic threshold, ensuring background noise (like fans or AC) doesn't interrupt the silence-detection auto-stop.
+
+---
+
 ```mermaid
 graph TD
     User([User]) -->|Voice / Text| UI[Next.js Client UI]
@@ -230,12 +241,5 @@ The dashboard includes a Claude Code-style **Agent Tool & Telemetry Inspector** 
 
 ---
 
-## Design Decisions & How the Agent Works
 
-### 1. The Agent's Logic (How it Works)
-The core of CalendyAI is an autonomous agent powered by Gemini 3.5 Flash Lite. Unlike simple chatbots, this agent operates in a loop of observation and action:
-- **Mandatory Conflict Checking**: The agent is explicitly instructed via its system prompt to always use the `list_events` tool before attempting to book a meeting. This ensures it maps out your day accurately.
-- **Advanced Conflict Resolution**: If a requested slot is occupied, the agent doesn't fail or blindly book. It calculates the next earliest free slot outside existing event boundaries and dynamically pivots to suggest an alternative time (e.g., "Tuesday is full, how about Wednesday at 10 AM?").
-- **Smarter Time Parsing**: The agent contextually maps relative requests like "sometime late next week" or "an hour before my 5 PM meeting" into precise ISO-8601 datetimes.
-- **Adaptive Voice Detection**: Rather than relying on rigid decibel thresholds, the app calibrates to your room's ambient noise floor during the first 500ms of recording. It then sets a dynamic threshold, ensuring background noise (like fans or AC) doesn't interrupt the silence-detection auto-stop.
 
