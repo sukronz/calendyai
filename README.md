@@ -129,30 +129,73 @@ calendyai/
 └── package.json
 ```
 
-### Request Flow
+### System Overview
 
+```mermaid
+graph TD
+    User([User]) -->|Voice / Text| UI[Next.js Client UI]
+    
+    subgraph Frontend [Client-Side App]
+        UI
+        Audio[Audio Capture & Playback]
+        UI --- Audio
+    end
+
+    subgraph Backend [Next.js Serverless APIs]
+        STT[POST /api/stt]
+        Chat[POST /api/chat]
+        TTS[POST /api/tts]
+    end
+    
+    subgraph Cloud Services [Google Cloud & AI]
+        GoogleSTT[Cloud Speech-to-Text]
+        Gemini[Gemini 3.5 Flash Lite]
+        GoogleCal[Google Calendar API]
+        GoogleTTS[Cloud Text-to-Speech]
+    end
+
+    Audio -->|WebM Blob| STT
+    STT -->|Transcript| Chat
+    Chat -->|Response Text| TTS
+    TTS -->|OGG_OPUS Audio| Audio
+
+    STT <-->|Transcribe| GoogleSTT
+    Chat <-->|LLM & Tools| Gemini
+    Chat <-->|CRUD Auth: OAuth2| GoogleCal
+    TTS <-->|Synthesize| GoogleTTS
 ```
-User speaks → MediaRecorder captures audio + Hybrid silence detection monitors volume (2s)
-                                      ↓
-                         POST /api/stt (audio blob)
-                                      ↓
-                      Google Cloud STT returns transcript
-                                      ↓
-                  POST /api/chat (transcript + message history)
-                                      ↓
-           Gemini 3.5 Flash Lite processes with Function Calling
-                    ↓ (if scheduling action detected)
-           Gemini calls list_events → checks conflict boundaries
-                    ↓
-           Gemini calls create_event / update_event / delete_event
-                    ↓
-           Gemini returns response text + tool execution telemetry logs
-                                      ↓
-                         POST /api/tts (response text)
-                                      ↓
-                     Google Cloud TTS returns OGG_OPUS audio
-                                      ↓
-           Browser plays audio → auto-resumes microphone loop
+
+### Voice Pipeline Request Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Browser
+    participant STT as /api/stt (Google STT)
+    participant Chat as /api/chat (Gemini)
+    participant Cal as Google Calendar API
+    participant TTS as /api/tts (Google TTS)
+
+    User->>Browser: Speaks Request
+    Browser->>Browser: Adaptive Silence Detection (2s)
+    Browser->>STT: POST WebM Audio Blob
+    STT-->>Browser: Transcript Text
+    
+    Browser->>Chat: POST Transcript + Chat History
+    Chat->>Chat: Evaluate Intent (System Prompt)
+    
+    opt Needs Calendar Info/Action
+        Chat->>Cal: Execute Tool (e.g., list_events)
+        Cal-->>Chat: Return Calendar State (Check Conflicts)
+        Chat->>Cal: Execute Tool (e.g., create_event)
+        Cal-->>Chat: Confirm Event Created
+    end
+    
+    Chat-->>Browser: LLM Text Response + Tool Telemetry
+    Browser->>TTS: POST Text Response
+    TTS-->>Browser: OGG_OPUS Audio Stream
+    Browser->>User: Play Audio Response
+    Browser->>Browser: Auto-Resume Mic
 ```
 
 ---
