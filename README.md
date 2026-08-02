@@ -239,8 +239,3 @@ The core of CalendyAI is an autonomous agent powered by Gemini 3.5 Flash Lite. U
 - **Smarter Time Parsing**: The agent contextually maps relative requests like "sometime late next week" or "an hour before my 5 PM meeting" into precise ISO-8601 datetimes.
 - **Adaptive Voice Detection**: Rather than relying on rigid decibel thresholds, the app calibrates to your room's ambient noise floor during the first 500ms of recording. It then sets a dynamic threshold, ensuring background noise (like fans or AC) doesn't interrupt the silence-detection auto-stop.
 
-### 2. High-Contrast "Newsprint" UI Design
-The interface intentionally avoids soft shadows and rounded corners. Instead, it employs a bold, high-contrast Bauhaus/Newsprint design aesthetic:
-- **Zero Border Radius**: Every element uses sharp, hard edges.
-- **Primary Colors**: Stark black and white with high-visibility accents (Red, Yellow, Blue).
-- **Telemetry Transparency**: The "Agent Inspector" exposes the raw LLM tool calls directly to the user. Rather than hiding the AI in a black box, it builds trust by showing exactly what the AI is thinking and executing in real-time.
