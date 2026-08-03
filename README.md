@@ -21,6 +21,7 @@ The application combines hands-free real-time audio streaming, an interactive **
 - **Gemini Multimodal Live API** — Powered by `gemini-3.1-flash-live-preview` for ultra-fast, bidirectional audio streaming and function calling.
 - **Real-Time Voice Streaming** — The Next.js frontend captures 16kHz PCM audio via an `AudioWorklet` and streams it directly to a Python FastAPI backend over WebSockets, bypassing traditional STT/TTS latency delays.
 - **Agent Tool Telemetry Inspector** — Live developer console window displaying real-time agent stages (`STANDBY`, `LISTENING`, `SPEAKING`, `EXECUTING_TOOL`) and logs for all function calls.
+- **AI-Native End-of-Turn Detection** — The application now uses AI to natively detect the end of a conversational turn, completely eliminating the need for traditional client-side Voice Activity Detection (VAD) or arbitrary silence thresholds.
 - **Full Calendar CRUD** — Create, read, update, and delete Google Calendar events through natural conversation.
 - **Auto-Reconnecting WebSockets** — The Python backend maintains a resilient loop, automatically spinning up a new Gemini Live session if the connection times out, providing an uninterrupted user experience.
 - **Dynamic Google Calendar Embed** — The frontend automatically refreshes the embedded Google Calendar widget whenever a mutating tool (create, update, delete) is executed.
@@ -59,8 +60,9 @@ calendyai/
 1. **Audio Capture**: The browser uses `getUserMedia` and an `AudioWorkletNode` (`pcm_processor.js`) to capture raw PCM audio at 16kHz.
 2. **Client-Server WebSocket**: The audio is streamed via WebSocket to the FastAPI backend (`ws://localhost:8000/ws/live`).
 3. **Gemini Live Connection**: FastAPI connects to the Gemini Multimodal Live API via the `google-genai` SDK and forwards the client's PCM audio in real-time.
-4. **Native Tool Calling**: When Gemini decides to interact with the calendar, it sends a `tool_call` request to FastAPI. FastAPI executes the Python `calendar_service` logic and returns the result to Gemini, while simultaneously emitting a `TOOL_LOG` payload to the Next.js frontend for telemetry and UI updates.
-5. **Audio Playback**: Gemini streams 24kHz PCM audio back through FastAPI to the browser, which plays it seamlessly via an `AudioContext`.
+4. **AI-Native Turn Detection**: Instead of relying on client-side Voice Activity Detection (VAD) algorithms to detect when the user stops talking, the frontend streams raw audio continuously. The backend utilizes the AI model's native turn detection capabilities over the WebSocket to recognize when the user has finished speaking. Once the AI signals that the turn is complete, the backend immediately tells the frontend to halt the microphone and transition into a speaking state.
+5. **Native Tool Calling**: When Gemini decides to interact with the calendar, it sends a `tool_call` request to FastAPI. FastAPI executes the Python `calendar_service` logic and returns the result to Gemini, while simultaneously emitting a `TOOL_LOG` payload to the Next.js frontend for telemetry and UI updates.
+6. **Audio Playback**: Gemini streams 24kHz PCM audio back through FastAPI to the browser, which plays it seamlessly via an `AudioContext`.
 
 ```mermaid
 graph TD
