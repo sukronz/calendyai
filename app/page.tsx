@@ -32,13 +32,13 @@ export default function Home() {
     {
       id: "init-1",
       stage: "info",
-      message: "CalendyAI Automated Turn-Taking Inspector Initialized.",
+      message: "CalendyAI Agent Initialized.",
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     },
     {
       id: "init-2",
       stage: "info",
-      message: "Multimodal Engine: Gemini 2.0 Flash with Native Audio & Calendar Tools.",
+      message: "Engine: Gemini 3.5 Flash Lite + Google Calendar API Tools.",
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     }
   ]);
@@ -48,10 +48,7 @@ export default function Home() {
   const [inputText, setInputText] = useState("");
 
   const logContainerRef = useRef<HTMLDivElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const isListeningRef = useRef<boolean>(false);
-  const speechDetectedRef = useRef<boolean>(false);
+  const recognitionRef = useRef<any>(null);
 
   const addLog = (stage: AgentLog["stage"], message: string) => {
     const newLog: AgentLog = {
@@ -110,121 +107,81 @@ export default function Home() {
     window.speechSynthesis.speak(utterance);
   };
 
-  const startAutomatedListening = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
-      isListeningRef.current = true;
-      speechDetectedRef.current = false;
+  const startListening = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Speech recognition is not supported in this browser. Please use Chrome.");
+      return;
+    }
 
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch (e) {}
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+    recognitionRef.current = recognition;
+
+    let finalTranscript = "";
+
+    recognition.onstart = () => {
       setIsListening(true);
       setAgentStage("LISTENING");
-      addLog("stt", "Mic listening... Speak your request naturally.");
+      addLog("stt", "Listening... Speak your request.");
+    };
 
-      const audioCtx = new AudioContext();
-      const source = audioCtx.createMediaStreamSource(stream);
-      const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 1024;
-      source.connect(analyser);
-
-      const bufferLength = analyser.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
-
-      let silenceStart: number | null = null;
-      let noiseFloor = 10;
-      let frameCount = 0;
-
-      const checkVAD = () => {
-        if (!isListeningRef.current) {
-          try { audioCtx.close(); } catch (e) {}
-          return;
+    recognition.onresult = (event: any) => {
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interim += transcript;
         }
+      }
+      setInputText(finalTranscript || interim);
+    };
 
-        analyser.getByteFrequencyData(dataArray);
-        let sum = 0;
-        for (let i = 0; i < bufferLength; i++) {
-          sum += dataArray[i];
-        }
-        const average = sum / bufferLength;
-
-        // Dynamic noise floor calibration
-        if (frameCount < 10) {
-          noiseFloor = (noiseFloor + average) / 2;
-          frameCount++;
-        }
-
-        const speechThreshold = Math.max(noiseFloor * 2.2, 18);
-
-        if (average > speechThreshold) {
-          if (!speechDetectedRef.current) {
-            speechDetectedRef.current = true;
-            addLog("stt", "Speech detected... Listening to user turn.");
-          }
-          silenceStart = null;
-        } else if (speechDetectedRef.current) {
-          if (!silenceStart) {
-            silenceStart = Date.now();
-          } else if (Date.now() - silenceStart > 1200) {
-            // End of turn detected automatically by speech envelope analysis
-            addLog("stt", "Automated end-of-turn detected. Processing request...");
-            stopAndSubmit();
-            try { audioCtx.close(); } catch (e) {}
-            return;
-          }
-        }
-
-        requestAnimationFrame(checkVAD);
-      };
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          audioChunksRef.current.push(e.data);
-        }
-      };
-
-      mediaRecorder.start(100);
-      requestAnimationFrame(checkVAD);
-
-    } catch (err: any) {
-      addLog("error", `Mic error: ${err.message}`);
+    recognition.onerror = (event: any) => {
+      console.error("Speech recognition error:", event.error);
+      addLog("error", `STT error: ${event.error}`);
       setIsListening(false);
       setAgentStage("STANDBY");
-    }
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      if (finalTranscript.trim()) {
+        addLog("stt", `STT: "${finalTranscript.trim()}"`);
+        processText(finalTranscript.trim());
+      } else {
+        addLog("info", "No speech detected.");
+        setAgentStage("STANDBY");
+      }
+    };
+
+    recognition.start();
   };
 
-  const stopAndSubmit = () => {
-    isListeningRef.current = false;
+  const stopListening = () => {
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch (e) {}
+    }
     setIsListening(false);
-
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
-
-      setTimeout(async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        if (audioBlob.size > 0 && speechDetectedRef.current) {
-          await processAudioTurn(audioBlob);
-        } else {
-          addLog("info", "No speech detected. Resetting to standby.");
-          setAgentStage("STANDBY");
-        }
-      }, 200);
-    }
   };
 
-  const processAudioTurn = async (blob: Blob) => {
+  const processText = async (text: string) => {
     setAgentStage("THINKING_LLM");
-    addLog("llm", "Sending audio directly to Gemini 2.0 Flash...");
+    addLog("llm", `Gemini 3.5 Flash Lite thinking...`);
 
     try {
-      const formData = new FormData();
-      formData.append("file", blob, "turn.webm");
-
       const res = await fetch("/api/chat", {
         method: "POST",
-        body: formData
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text })
       });
 
       const data = await res.json();
@@ -263,34 +220,8 @@ export default function Home() {
 
     const text = inputText.trim();
     setInputText("");
-    addLog("info", `Text query: "${text}"`);
-    setAgentStage("THINKING_LLM");
-
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text })
-      });
-      const data = await res.json();
-
-      if (data.toolLogs && data.toolLogs.length > 0) {
-        data.toolLogs.forEach((log: any) => {
-          setAgentStage("EXECUTING_TOOL");
-          addLog("tool_call", `${log.tool} executed`);
-          addLog("tool_result", `${log.tool} completed`);
-        });
-        setRefreshKey(Date.now());
-      }
-
-      if (data.reply) {
-        addLog("llm", `Response: "${data.reply}"`);
-        speakText(data.reply);
-      }
-    } catch (err: any) {
-      addLog("error", `Text error: ${err.message}`);
-      setAgentStage("STANDBY");
-    }
+    addLog("info", `Text directive: "${text}"`);
+    await processText(text);
   };
 
   if (status === "loading") {
@@ -331,7 +262,7 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Main Content Area */}
+      {/* Main Content */}
       <main className="flex-1 w-full relative bg-[#F0F0F0] p-4 sm:p-6 overflow-y-auto">
         <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 items-start pb-28">
 
@@ -361,7 +292,7 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Telemetry Inspector Console (5 Cols) */}
+          {/* Inspector Console (5 Cols) */}
           <div className="lg:col-span-5 flex flex-col space-y-3">
             <div className="flex items-center justify-between border-b-2 border-[#121212] pb-2">
               <div className="flex items-center gap-2 font-black text-xs sm:text-sm uppercase tracking-wider text-[#121212]">
@@ -452,7 +383,7 @@ export default function Home() {
           <div className="flex items-center gap-4 px-4 py-3 rounded-none bg-[#F0C020] border-4 border-[#121212] shadow-[6px_6px_0px_0px_#121212] transition-all">
             <button
               type="button"
-              onClick={isListening ? stopAndSubmit : startAutomatedListening}
+              onClick={isListening ? stopListening : startListening}
               className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-none border-2 border-[#121212] transition-all shadow-[3px_3px_0px_0px_#121212] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer ${isListening
                 ? "bg-[#D02020] text-white animate-pulse"
                 : "bg-white text-[#121212] hover:bg-[#F0F0F0]"
@@ -482,7 +413,7 @@ export default function Home() {
                 type="text"
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
-                placeholder={isListening ? "AUTOMATED VAD LISTENING..." : isSpeaking ? "SPEAKING..." : "TYPE OR TAP MIC..."}
+                placeholder={isListening ? "LISTENING..." : isSpeaking ? "SPEAKING..." : "TYPE OR TAP MIC..."}
                 disabled={isListening || isSpeaking}
                 className="flex-1 bg-transparent border-none text-xs font-bold uppercase text-[#121212] focus:outline-none placeholder:text-[#121212]/50"
               />

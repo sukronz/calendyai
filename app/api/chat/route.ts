@@ -92,60 +92,31 @@ export async function POST(req: Request) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
     }
 
-    const contentType = req.headers.get("content-type") || "";
+    const body = await req.json();
     let contents: any[] = [];
-    let textPrompt = "";
 
-    if (contentType.includes("multipart/form-data")) {
-      const formData = await req.formData();
-      const file = formData.get("file") as Blob;
-      if (file) {
-        const buffer = Buffer.from(await file.arrayBuffer());
-        const base64Audio = buffer.toString("base64");
-        contents.push({
-          inlineData: {
-            mimeType: file.type || "audio/webm",
-            data: base64Audio
-          }
-        });
-        contents.push({ text: "Listen to the audio input and assist the user with their calendar." });
-      }
+    if (body.text) {
+      contents.push({ text: body.text });
+    } else if (body.messages) {
+      contents = body.messages.map((m: any) => ({
+        role: m.role === "agent" ? "model" : "user",
+        parts: [{ text: m.content }]
+      }));
     } else {
-      const body = await req.json();
-      if (body.text) {
-        textPrompt = body.text;
-        contents.push({ text: body.text });
-      } else if (body.messages) {
-        contents = body.messages.map((m: any) => ({
-          role: m.role === "agent" ? "model" : "user",
-          parts: [{ text: m.content }]
-        }));
-      }
+      return new Response(JSON.stringify({ error: "No text input provided" }), { status: 400 });
     }
 
-    const candidateModels = ["gemini-3.5-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash-lite", "gemini-3.5-flash"];
-    let response: any = null;
-    let chat: any = null;
+    const model = genAI.getGenerativeModel({
+      model: "gemini-3.5-flash-lite",
+      systemInstruction,
+      tools
+    });
+
     const toolLogs: any[] = [];
+    const chat = model.startChat();
 
-    for (const modelName of candidateModels) {
-      try {
-        const model = genAI.getGenerativeModel({
-          model: modelName,
-          systemInstruction,
-          tools
-        });
-        chat = model.startChat();
-        let res = await chat.sendMessage(contents);
-        response = await res.response;
-        break; // Successfully got response
-      } catch (err: any) {
-        console.warn(`[Model ${modelName} failed]:`, err.message);
-        if (candidateModels.indexOf(modelName) === candidateModels.length - 1) {
-          throw err; // throw if all candidates fail
-        }
-      }
-    }
+    let result = await chat.sendMessage(contents);
+    let response = await result.response;
 
     // Handle tool calls in a loop
     while (response.functionCalls() && response.functionCalls()!.length > 0) {
