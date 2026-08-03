@@ -41,8 +41,8 @@ export default function LiveVoiceStream({ accessToken }: LiveVoiceStreamProps) {
         try {
           const payload = JSON.parse(event.data);
           if (payload.type === "READY") {
-            setStatusMessage("Gemini 2.0 Live Stream Ready!");
-            addLiveLog("Gemini Multimodal Live API (gemini-2.0-flash-exp) session active.");
+            setStatusMessage("Gemini 3.1 Flash Lite Live Stream Ready!");
+            addLiveLog("Gemini Multimodal Live API (gemini-3.1-flash-lite) session active.");
           } else if (payload.type === "TEXT_CHUNK") {
             setTextChunks(prev => prev + payload.text);
           } else if (payload.type === "TURN_COMPLETE") {

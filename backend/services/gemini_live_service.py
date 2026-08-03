@@ -68,7 +68,7 @@ async def handle_gemini_live_websocket(websocket: WebSocket):
     )
 
     try:
-        async with client.aio.live.connect(model="gemini-2.0-flash-exp", config=config) as session:
+        async with client.aio.live.connect(model="gemini-3.1-flash-lite", config=config) as session:
             await websocket.send_json({"type": "READY", "mode": "gemini-multimodal-live"})
 
             async def receive_from_client():
