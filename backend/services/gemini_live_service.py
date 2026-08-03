@@ -68,7 +68,7 @@ async def handle_gemini_live_websocket(websocket: WebSocket):
     )
 
     try:
-        async with client.aio.live.connect(model="gemini-3.1-flash-lite", config=config) as session:
+        async with client.aio.live.connect(model="gemini-2.0-flash-exp", config=config) as session:
             await websocket.send_json({"type": "READY", "mode": "gemini-multimodal-live"})
 
             async def receive_from_client():
@@ -100,7 +100,6 @@ async def handle_gemini_live_websocket(websocket: WebSocket):
                             if model_turn:
                                 for part in model_turn.parts:
                                     if part.inline_data:
-                                        # Send binary 24kHz PCM audio chunk to client
                                         await websocket.send_bytes(part.inline_data.data)
                                     elif part.text:
                                         await websocket.send_json({
@@ -155,12 +154,17 @@ async def handle_gemini_live_websocket(websocket: WebSocket):
                 except (WebSocketDisconnect, asyncio.CancelledError):
                     pass
 
-            # Run client listener and Gemini listener concurrently
             await asyncio.gather(receive_from_client(), receive_from_gemini())
 
     except Exception as e:
-        print(f"[Gemini Live Error]: {e}")
+        err_msg = str(e)
+        if "1008" in err_msg or "bidiGenerateContent" in err_msg or "not found" in err_msg:
+            user_err = "Gemini Multimodal Live API (bidiGenerateContent) requires a Billing-Enabled AI Studio Key or Google Cloud project. Please use the STANDARD VAD ENGINE tab for your key."
+        else:
+            user_err = f"Gemini Live Error: {err_msg}"
+        print(f"[Gemini Live Error]: {user_err}")
         try:
-            await websocket.send_json({"type": "ERROR", "error": str(e)})
+            await websocket.send_json({"type": "ERROR", "error": user_err})
+            await websocket.close(code=1000)
         except Exception:
             pass

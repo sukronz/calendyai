@@ -69,8 +69,8 @@ export default function LiveVoiceStream({ accessToken }: LiveVoiceStreamProps) {
     };
 
     ws.onerror = (err) => {
-      console.error("Live WebSocket Error:", err);
-      setStatusMessage("Live Stream Error");
+      setStatusMessage("Live Stream Error (Check API Permissions)");
+      addLiveLog("WebSocket connection error. Gemini Multimodal Live API requires billing-enabled AI Studio key.");
     };
   };
 
