@@ -58,7 +58,7 @@ async def handle_gemini_live_websocket(websocket: WebSocket):
         pass
 
     config = types.LiveConnectConfig(
-        response_modalities=[types.LiveModality.AUDIO],
+        response_modalities=["AUDIO"],
         speech_config=types.SpeechConfig(
             voice_config=types.VoiceConfig(
                 prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Kore")
