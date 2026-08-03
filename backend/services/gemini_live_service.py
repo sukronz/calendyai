@@ -57,8 +57,11 @@ async def handle_gemini_live_websocket(websocket: WebSocket):
     except Exception:
         pass
 
+    from services.ai_service import get_system_instruction
+
     config = types.LiveConnectConfig(
         response_modalities=["AUDIO"],
+        system_instruction=types.Content(parts=[types.Part.from_text(text=get_system_instruction())]),
         speech_config=types.SpeechConfig(
             voice_config=types.VoiceConfig(
                 prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Kore")
@@ -91,6 +94,8 @@ async def handle_gemini_live_websocket(websocket: WebSocket):
                                     turns=[types.Content(parts=[types.Part.from_text(text=text_prompt)])],
                                     turn_complete=True
                                 )
+                            elif data.get("type") == "PING":
+                                await websocket.send_json({"type": "PONG"})
                 except (WebSocketDisconnect, asyncio.CancelledError):
                     print("[Gemini Live] Client WebSocket disconnected (Client loop closed).")
                     raise

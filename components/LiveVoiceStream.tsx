@@ -29,11 +29,19 @@ export default function LiveVoiceStream({ accessToken }: LiveVoiceStreamProps) {
     const ws = new WebSocket("ws://localhost:8000/ws/live");
     wsRef.current = ws;
 
+    let heartbeatTimer: any = null;
+
     ws.onopen = () => {
       setIsConnected(true);
       setStatusMessage("Connected to Gemini Live Bridge");
       addLiveLog("WebSocket connected to ws://localhost:8000/ws/live");
       ws.send(JSON.stringify({ type: "INIT", accessToken }));
+
+      heartbeatTimer = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "PING" }));
+        }
+      }, 8000);
     };
 
     ws.onmessage = async (event) => {
@@ -61,6 +69,9 @@ export default function LiveVoiceStream({ accessToken }: LiveVoiceStreamProps) {
     };
 
     ws.onclose = () => {
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+      }
       setIsConnected(false);
       setIsLiveStreaming(false);
       setStatusMessage("Disconnected from Live WebSocket");
