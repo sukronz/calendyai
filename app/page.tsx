@@ -84,6 +84,9 @@ export default function Home() {
     }
   }, []);
 
+  const isAgentSpeakingRef = useRef<boolean>(false);
+  const currentAgentSpokenTextRef = useRef<string>("");
+
   const speakText = (text: string, onEnd?: () => void) => {
     if (!('speechSynthesis' in window)) {
       if (onEnd) onEnd();
@@ -97,26 +100,21 @@ export default function Home() {
     utterance.pitch = 1.0;
 
     // Load available voices and strictly select female English voices
-    const voices = window.speechSynthesis.getVoices();
-    const femaleNames = [
-      "google uk english female",
-      "samantha",
-      "victoria",
-      "karen",
-      "zira",
-      "jenny",
-      "aria",
-      "fiona",
-      "moira",
-      "veena",
-      "tessa"
-    ];
-    const maleKeywords = ["male", "daniel", "alex", "fred", "george", "david", "mark", "oliver", "rishi"];
+    currentAgentSpokenTextRef.current = cleanText.toLowerCase();
 
+    const voices = window.speechSynthesis.getVoices();
+    const maleKeywords = ["male", "daniel", "alex", "fred", "george", "david", "mark", "oliver", "rishi"];
     const femaleVoice = voices.find(v =>
-      v.lang.startsWith("en") &&
-      (femaleNames.some(name => v.name.toLowerCase().includes(name)) || v.name.toLowerCase().includes("female"))
-    ) || voices.find(v =>
+      (v.name.includes("Female") ||
+        v.name.includes("Samantha") ||
+        v.name.includes("Victoria") ||
+        v.name.includes("Karen") ||
+        v.name.includes("Zira") ||
+        v.name.includes("Jenny") ||
+        v.name.includes("Aria") ||
+        v.name.includes("Fiona") ||
+        v.name.includes("Moira") ||
+        v.name.includes("Google UK English Female")) &&
       v.lang.startsWith("en") &&
       !maleKeywords.some(m => v.name.toLowerCase().includes(m))
     ) || voices.find(v => v.lang.startsWith("en"));
@@ -124,31 +122,32 @@ export default function Home() {
     if (femaleVoice) {
       utterance.voice = femaleVoice;
     }
-    utterance.pitch = 1.1; // Slightly higher pitch for natural female vocal tone
+    utterance.pitch = 1.1;
 
     utterance.onstart = () => {
       setIsSpeaking(true);
+      isAgentSpeakingRef.current = true;
       setAgentStage("SPEAKING");
       addLog("tts", `Speaking: "${cleanText}"`);
-      // Start active background listening for automatic barge-in while speaking
-      startListening(true);
     };
 
     utterance.onend = () => {
       setIsSpeaking(false);
+      isAgentSpeakingRef.current = false;
+      currentAgentSpokenTextRef.current = "";
       setAgentStage("STANDBY");
       addLog("info", "Agent finished speaking.");
       if (onEnd) onEnd();
     };
 
     utterance.onerror = (e: any) => {
+      setIsSpeaking(false);
+      isAgentSpeakingRef.current = false;
+      currentAgentSpokenTextRef.current = "";
       if (e?.error === "canceled" || e?.error === "interrupted") {
-        // Intentional cancellation during user barge-in — ignore cleanly
-        setIsSpeaking(false);
         return;
       }
       console.error("SpeechSynthesis error:", e);
-      setIsSpeaking(false);
       setAgentStage("STANDBY");
       if (onEnd) onEnd();
     };
@@ -168,6 +167,8 @@ export default function Home() {
 
   const stopSpeaking = () => {
     isInterruptedRef.current = true;
+    isAgentSpeakingRef.current = false;
+    currentAgentSpokenTextRef.current = "";
     currentTurnIdRef.current = null;
     if (typeof window !== "undefined" && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
@@ -195,7 +196,7 @@ export default function Home() {
     }
 
     const recognition = new SpeechRecognition();
-    recognition.continuous = true; // Always listen continuously
+    recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = "en-US";
     recognitionRef.current = recognition;
@@ -215,17 +216,12 @@ export default function Home() {
 
     // Feature 2: Auto Voice Detection on Speech Start -> Halt & Dump Agent Speech
     recognition.onspeechstart = () => {
-      if (typeof window !== "undefined" && (window.speechSynthesis.speaking || isSpeaking)) {
+      if (typeof window !== "undefined" && (window.speechSynthesis.speaking || isSpeaking || isAgentSpeakingRef.current)) {
         stopSpeaking();
       }
     };
 
     recognition.onresult = (event: any) => {
-      // Feature 2: Auto Voice Detection Barge-In on Result -> Dump TTS
-      if (typeof window !== "undefined" && (window.speechSynthesis.speaking || isSpeaking)) {
-        stopSpeaking();
-      }
-
       let interim = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
@@ -237,6 +233,19 @@ export default function Home() {
       }
 
       const currentText = (finalTranscript || interim).trim();
+
+      // Speaker Echo Cancellation: Filter out speech output picked up by microphone!
+      if (isAgentSpeakingRef.current && currentAgentSpokenTextRef.current) {
+        const lowerCurrent = currentText.toLowerCase();
+        const spoken = currentAgentSpokenTextRef.current;
+        if (spoken.includes(lowerCurrent) || lowerCurrent.includes(spoken.substring(0, Math.min(15, spoken.length)))) {
+          console.log("Filtered speaker feedback echo:", currentText);
+          return;
+        }
+        // If user speaks distinct new text while agent is speaking, trigger barge-in!
+        stopSpeaking();
+      }
+
       setInputText(currentText);
 
       // Feature 1: Auto Silence Detection (900ms threshold + 2-word minimum & filler word filter)
