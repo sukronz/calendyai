@@ -151,18 +151,26 @@ export default function Home() {
     window.speechSynthesis.speak(utterance);
   };
 
+  const isMicExplicitlyActiveRef = useRef(false);
+  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isProcessingTurnRef = useRef<boolean>(false);
+  const hasLoggedMicActiveRef = useRef(false);
+
+  const currentTurnIdRef = useRef<string | null>(null);
+  const isInterruptedRef = useRef<boolean>(false);
+  const lastProcessedTextRef = useRef<string>("");
+  const lastProcessedTimeRef = useRef<number>(0);
+
   const stopSpeaking = () => {
+    isInterruptedRef.current = true;
+    currentTurnIdRef.current = null;
     if (typeof window !== "undefined" && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       setIsSpeaking(false);
       setAgentStage("STANDBY");
-      addLog("info", "⚡ User Barge-In: Speech synthesis canceled instantly.");
+      addLog("info", "⚡ User Barge-In: Speech canceled & dumped previous response.");
     }
   };
-
-  const isMicExplicitlyActiveRef = useRef(false);
-  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const isProcessingTurnRef = useRef<boolean>(false);
 
   const startListening = (isBargeInListener: boolean = false) => {
     if (!isBargeInListener) {
@@ -193,27 +201,24 @@ export default function Home() {
       setIsListening(true);
       if (!isBargeInListener) {
         setAgentStage("LISTENING");
-        addLog("stt", "Continuous Microphone Active. Speak anytime!");
+        if (!hasLoggedMicActiveRef.current) {
+          hasLoggedMicActiveRef.current = true;
+          addLog("stt", "Continuous Microphone Active. Speak anytime!");
+        }
       }
     };
 
-    // Feature 2: Auto Voice Detection on Speech Start -> Halt Agent Speech Immediately
+    // Feature 2: Auto Voice Detection on Speech Start -> Halt & Dump Agent Speech
     recognition.onspeechstart = () => {
       if (typeof window !== "undefined" && (window.speechSynthesis.speaking || isSpeaking)) {
-        window.speechSynthesis.cancel();
-        setIsSpeaking(false);
-        setAgentStage("LISTENING");
-        addLog("info", "⚡ Auto Voice Detection Barge-In: User speech detected — halting agent speech!");
+        stopSpeaking();
       }
     };
 
     recognition.onresult = (event: any) => {
-      // Feature 2: Auto Voice Detection Barge-In on Result
+      // Feature 2: Auto Voice Detection Barge-In on Result -> Dump TTS
       if (typeof window !== "undefined" && (window.speechSynthesis.speaking || isSpeaking)) {
-        window.speechSynthesis.cancel();
-        setIsSpeaking(false);
-        setAgentStage("LISTENING");
-        addLog("info", "⚡ Auto Voice Detection Barge-In: User speech detected — halting agent speech!");
+        stopSpeaking();
       }
 
       let interim = "";
@@ -229,16 +234,23 @@ export default function Home() {
       const currentText = (finalTranscript || interim).trim();
       setInputText(currentText);
 
-      // Feature 1: Auto Silence Detection when User is Speaking -> Triggers LLM automatically!
+      // Feature 1: Auto Silence Detection (900ms threshold + 2-word minimum & filler word filter)
       if (silenceTimerRef.current) {
         clearTimeout(silenceTimerRef.current);
       }
 
-      if (currentText.length > 0 && !isProcessingTurnRef.current) {
+      const FILLER_WORDS = new Set(["uh", "um", "ah", "er", "hmm", "eh", "like", "so"]);
+      const VALID_SINGLE_WORDS = new Set(["yes", "no", "cancel", "stop", "okay", "ok", "yep", "nope"]);
+
+      const words = currentText.toLowerCase().split(/\s+/).filter(Boolean);
+      const isFillerOnly = words.every(w => FILLER_WORDS.has(w));
+      const hasEnoughWords = words.length >= 2 || (words.length === 1 && VALID_SINGLE_WORDS.has(words[0]));
+
+      if (currentText.length > 0 && !isProcessingTurnRef.current && !isFillerOnly && hasEnoughWords) {
         silenceTimerRef.current = setTimeout(() => {
           if (currentText.length > 0 && !isProcessingTurnRef.current) {
             isProcessingTurnRef.current = true;
-            addLog("stt", `STT Auto Silence: "${currentText}"`);
+            addLog("stt", `STT Auto Silence (900ms): "${currentText}"`);
             addLog("info", "⚡ Auto Silence Detected — Submitting to LLM Agent...");
 
             const textToSubmit = currentText;
@@ -249,7 +261,7 @@ export default function Home() {
               isProcessingTurnRef.current = false;
             });
           }
-        }, 650); // 650ms silence detection threshold
+        }, 900); // 900ms silence detection threshold
       }
     };
 
@@ -276,9 +288,11 @@ export default function Home() {
 
     recognition.onend = () => {
       if (finalTranscript.trim() && !isProcessingTurnRef.current) {
-        addLog("stt", `STT: "${finalTranscript.trim()}"`);
+        const textToSubmit = finalTranscript.trim();
+        finalTranscript = "";
         isProcessingTurnRef.current = true;
-        processText(finalTranscript.trim()).finally(() => {
+        addLog("stt", `STT Final: "${textToSubmit}"`);
+        processText(textToSubmit).finally(() => {
           isProcessingTurnRef.current = false;
         });
       }
@@ -306,6 +320,7 @@ export default function Home() {
 
   const stopListening = () => {
     isMicExplicitlyActiveRef.current = false;
+    hasLoggedMicActiveRef.current = false;
     if (recognitionRef.current) {
       try { recognitionRef.current.stop(); } catch (e) { }
     }
@@ -315,17 +330,41 @@ export default function Home() {
   };
 
   const processText = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    // 1. Deduplicate rapid identical submissions within 3 seconds
+    const now = Date.now();
+    if (trimmed === lastProcessedTextRef.current && (now - lastProcessedTimeRef.current) < 3000) {
+      console.log("Prevented duplicate processText execution for:", trimmed);
+      return;
+    }
+
+    lastProcessedTextRef.current = trimmed;
+    lastProcessedTimeRef.current = now;
+
+    // 2. Assign Turn ID & Reset Interrupt Flag
+    const thisTurnId = Math.random().toString(36).substring(7);
+    currentTurnIdRef.current = thisTurnId;
+    isInterruptedRef.current = false;
+
     setAgentStage("THINKING_LLM");
-    addLog("llm", `Gemini 3.5 Flash Lite thinking...`);
+    addLog("llm", `Gemini 3.1 Flash Lite thinking...`);
 
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text })
+        body: JSON.stringify({ text: trimmed })
       });
 
       const data = await res.json();
+
+      // 3. Barge-In Check: If user barged in during LLM fetch, DUMP response!
+      if (isInterruptedRef.current || currentTurnIdRef.current !== thisTurnId) {
+        addLog("info", "🚫 User barged in — dumped previous response.");
+        return;
+      }
 
       if (data.toolLogs && data.toolLogs.length > 0) {
         data.toolLogs.forEach((log: any) => {
@@ -340,6 +379,12 @@ export default function Home() {
           addLog("tool_result", `${log.tool} finished`);
         });
         setRefreshKey(Date.now());
+      }
+
+      // 4. Final Barge-In Check before speaking
+      if (isInterruptedRef.current || currentTurnIdRef.current !== thisTurnId) {
+        addLog("info", "🚫 User barged in — dumped previous response.");
+        return;
       }
 
       if (data.reply) {

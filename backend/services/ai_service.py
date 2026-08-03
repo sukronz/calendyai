@@ -88,6 +88,7 @@ TOOLS = [
 ]
 
 MODEL_CANDIDATES = [
+    "gemini-3.1-flash-lite",
     "gemini-flash-latest",
     "gemini-2.0-flash"
 ]
