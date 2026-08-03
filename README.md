@@ -29,7 +29,13 @@ The application combines hands-free real-time audio streaming, an interactive **
 
 ## Architecture
 
-The system has been heavily upgraded to use a hybrid Next.js + FastAPI architecture, maximizing the capabilities of the Gemini Multimodal Live API.
+### Why this Architecture?
+The transition from a pure Next.js monolith to a hybrid Next.js + FastAPI (Python) architecture was a deliberate design choice dictated by the requirements of the **Gemini Multimodal Live API**:
+1. **Secure Real-Time Streaming**: The Gemini Live API requires a persistent WebSocket connection. We cannot securely connect the browser directly to Google's API without exposing our `GEMINI_API_KEY` to the public client. 
+2. **Resilient Server-Side Connections**: By routing the client WebSocket through FastAPI, the Python server can securely manage the Gemini API key, handle Google Calendar tool execution natively in the backend, and silently auto-reconnect the Gemini session if it times out—all without disrupting the user's frontend experience.
+3. **High-Performance Audio**: Python's `google-genai` SDK is highly optimized for asynchronous bidirectional streaming, making it ideal as a middleware proxy for raw 16kHz/24kHz PCM audio blobs.
+
+The system has been heavily upgraded to use this hybrid architecture, maximizing the capabilities of the Gemini Multimodal Live API.
 
 ```text
 calendyai/
@@ -85,6 +91,43 @@ graph TD
     Gemini <-->|Tool Calls / Results| WS_Server
     CalService <-->|CRUD via OAuth Token| GoogleCal
     WS_Server -->|TOOL_LOG JSON| UI
+```
+
+---
+
+## GCP Cloud Run Deployment
+
+Because this is a hybrid architecture, you must deploy **two separate Cloud Run services**: one for the Python backend, and one for the Next.js frontend.
+
+### 1. Deploy the FastAPI Backend
+Ensure your `gcloud` CLI is logged into your project. Run this from the `backend/` directory:
+
+```bash
+cd backend
+gcloud run deploy calendy-backend \
+  --source . \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --set-env-vars "GEMINI_API_KEY=your_gemini_key,GOOGLE_API_KEY=your_google_key"
+```
+*Note the returned service URL (e.g., `https://calendy-backend-xxx.a.run.app`). You will need its WebSocket equivalent for the frontend.*
+
+### 2. Deploy the Next.js Frontend
+Run this from the project root. Replace `NEXT_PUBLIC_WS_URL` with your backend URL, changing `https://` to `wss://` and appending `/ws/live` (e.g., `wss://calendy-backend-xxx.a.run.app/ws/live`):
+
+```bash
+cd ..
+gcloud run deploy calendy-frontend \
+  --source . \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --set-env-vars "GOOGLE_CLIENT_ID=your_id,GOOGLE_CLIENT_SECRET=your_secret,NEXTAUTH_SECRET=your_secret,NEXT_PUBLIC_WS_URL=wss://calendy-backend-xxx.a.run.app/ws/live"
+```
+
+### 3. Configure OAuth Redirect URI
+In Google Cloud Console Credentials, add your new frontend Cloud Run URL under **Authorized redirect URIs**:
+```text
+https://calendy-frontend-xxx.a.run.app/api/auth/callback/google
 ```
 
 ---

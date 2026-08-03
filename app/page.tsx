@@ -80,7 +80,8 @@ export default function Home() {
     if (wsRef.current) return;
 
     addLog("info", "Connecting to Gemini Live WebSocket...");
-    const ws = new WebSocket("ws://localhost:8000/ws/live");
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws/live";
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     let heartbeatTimer: any = null;
