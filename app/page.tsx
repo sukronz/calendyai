@@ -141,7 +141,12 @@ export default function Home() {
       if (onEnd) onEnd();
     };
 
-    utterance.onerror = (e) => {
+    utterance.onerror = (e: any) => {
+      if (e?.error === "canceled" || e?.error === "interrupted") {
+        // Intentional cancellation during user barge-in — ignore cleanly
+        setIsSpeaking(false);
+        return;
+      }
       console.error("SpeechSynthesis error:", e);
       setIsSpeaking(false);
       setAgentStage("STANDBY");
