@@ -78,15 +78,17 @@ async def handle_gemini_live_websocket(websocket: WebSocket):
                         msg = await websocket.receive()
                         if "bytes" in msg and msg["bytes"]:
                             pcm_data = msg["bytes"]
-                            await session.send(
-                                input={"data": pcm_data, "mime_type": "audio/pcm"},
-                                end_of_turn=False
+                            await session.send_realtime_input(
+                                audio=types.Blob(data=pcm_data, mime_type="audio/pcm")
                             )
                         elif "text" in msg and msg["text"]:
                             data = json.loads(msg["text"])
                             if data.get("type") == "TEXT_PROMPT":
                                 text_prompt = data.get("prompt", "")
-                                await session.send(input=text_prompt, end_of_turn=True)
+                                await session.send_client_content(
+                                    turns=[types.Content(parts=[types.Part.from_text(text=text_prompt)])],
+                                    turn_complete=True
+                                )
                 except (WebSocketDisconnect, asyncio.CancelledError):
                     pass
 
@@ -147,9 +149,9 @@ async def handle_gemini_live_websocket(websocket: WebSocket):
                                     response=result
                                 ))
 
-                            await session.send(input=types.LiveClientToolResponse(
+                            await session.send_tool_response(
                                 function_responses=function_responses
-                            ))
+                            )
 
                 except (WebSocketDisconnect, asyncio.CancelledError):
                     pass
