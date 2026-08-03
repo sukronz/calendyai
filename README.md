@@ -1,58 +1,90 @@
 # CalendyAI
 
-A voice-first meeting scheduling assistant powered by **Gemini 3.5 Flash Lite** and Google Cloud AI services, integrating directly with Google Calendar. CalendyAI allows users to manage their entire schedule through natural language voice commands, removing the friction of manual calendar interactions.
+A voice-first meeting scheduling assistant powered by **Gemini 3.1 Flash Multimodal Live API**, integrating directly with Google Calendar. CalendyAI allows users to manage their entire schedule through low-latency, natural language voice streaming, removing the friction of manual calendar interactions.
 
-The application combines hands-free voice automation, an interactive **Agent Tool Telemetry Inspector**, and a high-contrast design system.
+The application combines hands-free real-time audio streaming, an interactive **Agent Tool Telemetry Inspector**, and a high-contrast design system.
 
 ---
 
 ## Table of Contents
 
 - [Features](#features)
-- [GCP Cloud Run Deployment](#gcp-cloud-run-deployment)
-- [Local Development Setup](#local-development-setup)
 - [Architecture](#architecture)
-- [Technologies](#technologies)
+- [Local Development Setup](#local-development-setup)
 - [Agent Tool Telemetry Inspector](#agent-tool-telemetry-inspector)
-- [Design Decisions](#design-decisions)
+- [Technologies](#technologies)
 
 ---
 
 ## Features
 
-- **Gemini 3.5 Flash Lite Intelligence** — Powered by `gemini-3.5-flash-lite` for ultra-fast, tool-calling natural language scheduling.
-- **Voice-First Interaction** — Tap the microphone, speak your request, and the assistant handles the rest. Supports continuous hands-free operation with hybrid silence detection and auto-resume after each response.
-- **Agent Tool Telemetry Inspector** — Claude Code-style live developer console window displaying real-time agent stages (`STANDBY`, `RECORDING_STT`, `THINKING_LLM`, `EXECUTING_TOOL`, `SYNTHESIZING_TTS`) and full JSON payload logs for all function calls.
+- **Gemini Multimodal Live API** — Powered by `gemini-3.1-flash-live-preview` for ultra-fast, bidirectional audio streaming and function calling.
+- **Real-Time Voice Streaming** — The Next.js frontend captures 16kHz PCM audio via an `AudioWorklet` and streams it directly to a Python FastAPI backend over WebSockets, bypassing traditional STT/TTS latency delays.
+- **Agent Tool Telemetry Inspector** — Live developer console window displaying real-time agent stages (`STANDBY`, `LISTENING`, `SPEAKING`, `EXECUTING_TOOL`) and logs for all function calls.
 - **Full Calendar CRUD** — Create, read, update, and delete Google Calendar events through natural conversation.
-- **Accurate Conflict Resolution** — Automatically checks for scheduling conflicts using `list_events` and calculates the next earliest truly free time slot outside existing event boundaries.
-- **Text-to-Speech Responses** — Every AI response is synthesized into low-latency `OGG_OPUS` audio using Google Cloud TTS, accompanied by a synchronized waveform visualizer.
-- **Google Cloud Run Ready** — Includes a multi-stage `Dockerfile`, `.dockerignore`, and 1-command deployment script to Google Cloud Run.
+- **Auto-Reconnecting WebSockets** — The Python backend maintains a resilient loop, automatically spinning up a new Gemini Live session if the connection times out, providing an uninterrupted user experience.
+- **Dynamic Google Calendar Embed** — The frontend automatically refreshes the embedded Google Calendar widget whenever a mutating tool (create, update, delete) is executed.
 
 ---
 
-## GCP Cloud Run Deployment
+## Architecture
 
-CalendyAI is pre-configured for instant deployment to Google Cloud Run.
+The system has been heavily upgraded to use a hybrid Next.js + FastAPI architecture, maximizing the capabilities of the Gemini Multimodal Live API.
 
-### 1. Build and Deploy from CLI
-
-Ensure the `gcloud` CLI is logged in and set to your GCP project:
-
-```bash
-gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com
-
-gcloud run deploy calendy \
-  --source . \
-  --region us-central1 \
-  --allow-unauthenticated \
-  --set-env-vars "GOOGLE_CLIENT_ID=your_id,GOOGLE_CLIENT_SECRET=your_secret,NEXTAUTH_SECRET=your_secret,GEMINI_API_KEY=your_gemini_key,GOOGLE_API_KEY=your_google_key"
+```text
+calendyai/
+├── app/
+│   ├── api/auth/          # NextAuth.js Google OAuth handler (for Calendar scopes)
+│   ├── login/             # Login page
+│   ├── page.tsx           # Main dashboard (calendar iframe + Agent Inspector + Voice Dock)
+│   ├── globals.css        # Global styles
+├── backend/
+│   ├── main.py                    # FastAPI entry point
+│   ├── services/
+│   │   ├── gemini_live_service.py # Gemini Live API WebSocket handler & auto-reconnect loop
+│   │   ├── calendar_service.py    # Google Calendar CRUD Python service
+│   │   └── ai_service.py          # System instructions & fallback handlers
+├── public/
+│   └── pcm_processor.js   # Client-side AudioWorklet for raw 16kHz PCM capturing
 ```
 
-### 2. Configure OAuth Redirect URI
+### System Flow & WebSockets
 
-In [Google Cloud Console Credentials](https://console.cloud.google.com/apis/credentials), add your Cloud Run URL under **Authorized redirect URIs**:
-```text
-https://calendy-166658098413.us-central1.run.app/api/auth/callback/google
+1. **Audio Capture**: The browser uses `getUserMedia` and an `AudioWorkletNode` (`pcm_processor.js`) to capture raw PCM audio at 16kHz.
+2. **Client-Server WebSocket**: The audio is streamed via WebSocket to the FastAPI backend (`ws://localhost:8000/ws/live`).
+3. **Gemini Live Connection**: FastAPI connects to the Gemini Multimodal Live API via the `google-genai` SDK and forwards the client's PCM audio in real-time.
+4. **Native Tool Calling**: When Gemini decides to interact with the calendar, it sends a `tool_call` request to FastAPI. FastAPI executes the Python `calendar_service` logic and returns the result to Gemini, while simultaneously emitting a `TOOL_LOG` payload to the Next.js frontend for telemetry and UI updates.
+5. **Audio Playback**: Gemini streams 24kHz PCM audio back through FastAPI to the browser, which plays it seamlessly via an `AudioContext`.
+
+```mermaid
+graph TD
+    User([User]) -->|Speaks| Mic[Browser Mic & AudioWorklet]
+    
+    subgraph Frontend [Next.js Client]
+        Mic
+        UI[Dashboard & Inspector]
+        Player[Browser AudioContext]
+    end
+
+    subgraph Backend [FastAPI Python Server]
+        WS_Server[WebSocket Endpoint]
+        CalService[Calendar Service]
+        WS_Server <--> CalService
+    end
+    
+    subgraph Cloud [Google Cloud]
+        Gemini[Gemini 3.1 Live API]
+        GoogleCal[Google Calendar API]
+    end
+
+    Mic -->|16kHz PCM Stream| WS_Server
+    WS_Server -->|Real-time Input| Gemini
+    Gemini -->|24kHz PCM Stream| WS_Server
+    WS_Server -->|Audio Blobs| Player
+    
+    Gemini <-->|Tool Calls / Results| WS_Server
+    CalService <-->|CRUD via OAuth Token| GoogleCal
+    WS_Server -->|TOOL_LOG JSON| UI
 ```
 
 ---
@@ -62,12 +94,10 @@ https://calendy-166658098413.us-central1.run.app/api/auth/callback/google
 ### Prerequisites
 
 - **Node.js** 18+ and npm
-- A **Google Cloud** project with APIs enabled:
-  - Google Calendar API
-  - Google Cloud Text-to-Speech API
-  - Google Cloud Speech-to-Text API
-- **OAuth 2.0 credentials** (Client ID and Client Secret) configured in Google Cloud Console with `http://localhost:3000/api/auth/callback/google` as an authorized redirect URI.
-- A **Gemini API key** from [Google AI Studio](https://aistudio.google.com/).
+- **Python** 3.9+
+- A **Google Cloud** project with the Google Calendar API enabled.
+- **OAuth 2.0 credentials** configured in Google Cloud Console.
+- A **Gemini API key** from [Google AI Studio](https://aistudio.google.com/) (Must be a billing-enabled key or project to use the Live API).
 
 ### 1. Clone the Repository
 
@@ -76,13 +106,7 @@ git clone https://github.com/sukronz/calendyai.git
 cd calendyai
 ```
 
-### 2. Install Dependencies
-
-```bash
-npm install
-```
-
-### 3. Configure Environment Variables
+### 2. Configure Environment Variables
 
 Create a `.env.local` file in the project root:
 
@@ -90,137 +114,45 @@ Create a `.env.local` file in the project root:
 GOOGLE_CLIENT_ID=your_google_oauth_client_id
 GOOGLE_CLIENT_SECRET=your_google_oauth_client_secret
 GEMINI_API_KEY=your_gemini_api_key
-GOOGLE_API_KEY=your_google_api_key
 NEXTAUTH_SECRET=any_random_secret_string
 NEXTAUTH_URL=http://localhost:3000
 ```
 
-### 4. Run the Development Server
+### 3. Start the Next.js Frontend
 
 ```bash
+npm install
 npm run dev
 ```
 
-The application will be available at `http://localhost:3000`.
+### 4. Start the FastAPI Backend
 
----
+In a new terminal window:
 
-## Architecture
-
-```
-calendyai/
-├── app/
-│   ├── api/
-│   │   ├── auth/[...nextauth]/   # NextAuth.js Google OAuth handler
-│   │   ├── chat/                  # Gemini 3.5 Flash Lite LLM + function calling route
-│   │   ├── stt/                   # Google Cloud Speech-to-Text proxy
-│   │   ├── tts/                   # Google Cloud Text-to-Speech proxy (OGG_OPUS)
-│   │   └── events/                # Direct calendar event CRUD endpoint
-│   ├── login/                     # Login page
-│   ├── page.tsx                   # Main dashboard (compact calendar + Agent Inspector + voice dock)
-│   ├── layout.tsx                 # Root layout
-│   ├── providers.tsx              # NextAuth SessionProvider wrapper
-│   └── globals.css                # Global styles, tokens, and animations
-├── lib/
-│   ├── authOptions.ts             # NextAuth configuration (Google OAuth + Calendar scope)
-│   └── calendar.ts                # Google Calendar API client (list, create, update, delete)
-├── Dockerfile                     # Multi-stage production container build
-├── next.config.ts                 # Next.js config (standalone output enabled)
-└── package.json
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
 ```
 
-### System Overview
-
-## Design Decisions & How the Agent Works
-
-### 1. The Agent's Logic (How it Works)
-The core of CalendyAI is an autonomous agent powered by Gemini 3.5 Flash Lite. Unlike simple chatbots, this agent operates in a loop of observation and action:
-- **Mandatory Conflict Checking**: The agent is explicitly instructed via its system prompt to always use the `list_events` tool before attempting to book a meeting. This ensures it maps out your day accurately.
-- **Advanced Conflict Resolution**: If a requested slot is occupied, the agent doesn't fail or blindly book. It calculates the next earliest free slot outside existing event boundaries and dynamically pivots to suggest an alternative time (e.g., "Tuesday is full, how about Wednesday at 10 AM?").
-- **Smarter Time Parsing**: The agent contextually maps relative requests like "sometime late next week" or "an hour before my 5 PM meeting" into precise ISO-8601 datetimes.
-- **Adaptive Voice Detection**: Rather than relying on rigid decibel thresholds, the app calibrates to your room's ambient noise floor during the first 500ms of recording. It then sets a dynamic threshold, ensuring background noise (like fans or AC) doesn't interrupt the silence-detection auto-stop.
-
----
-
-```mermaid
-graph TD
-    User([User]) -->|Voice / Text| UI[Next.js Client UI]
-    
-    subgraph Frontend [Client-Side App]
-        UI
-        Audio[Audio Capture & Playback]
-        UI --- Audio
-    end
-
-    subgraph Backend [Next.js Serverless APIs]
-        STT[POST /api/stt]
-        Chat[POST /api/chat]
-        TTS[POST /api/tts]
-    end
-    
-    subgraph Cloud Services [Google Cloud & AI]
-        GoogleSTT[Cloud Speech-to-Text]
-        Gemini[Gemini 3.5 Flash Lite]
-        GoogleCal[Google Calendar API]
-        GoogleTTS[Cloud Text-to-Speech]
-    end
-
-    Audio -->|WebM Blob| STT
-    STT -->|Transcript| Chat
-    Chat -->|Response Text| TTS
-    TTS -->|OGG_OPUS Audio| Audio
-
-    STT <-->|Transcribe| GoogleSTT
-    Chat <-->|LLM & Tools| Gemini
-    Chat <-->|CRUD Auth: OAuth2| GoogleCal
-    TTS <-->|Synthesize| GoogleTTS
-```
-
-### Voice Pipeline Request Flow
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Browser
-    participant STT as /api/stt (Google STT)
-    participant Chat as /api/chat (Gemini)
-    participant Cal as Google Calendar API
-    participant TTS as /api/tts (Google TTS)
-
-    User->>Browser: Speaks Request
-    Browser->>Browser: Adaptive Silence Detection (2s)
-    Browser->>STT: POST WebM Audio Blob
-    STT-->>Browser: Transcript Text
-    
-    Browser->>Chat: POST Transcript + Chat History
-    Chat->>Chat: Evaluate Intent (System Prompt)
-    
-    opt Needs Calendar Info/Action
-        Chat->>Cal: Execute Tool (e.g., list_events)
-        Cal-->>Chat: Return Calendar State (Check Conflicts)
-        Chat->>Cal: Execute Tool (e.g., create_event)
-        Cal-->>Chat: Confirm Event Created
-    end
-    
-    Chat-->>Browser: LLM Text Response + Tool Telemetry
-    Browser->>TTS: POST Text Response
-    TTS-->>Browser: OGG_OPUS Audio Stream
-    Browser->>User: Play Audio Response
-    Browser->>Browser: Auto-Resume Mic
-```
+The application frontend will be available at `http://localhost:3000`.
 
 ---
 
 ## Agent Tool Telemetry Inspector
 
-The dashboard includes a Claude Code-style **Agent Tool & Telemetry Inspector** terminal window:
+The dashboard includes a live **Agent Tool & Telemetry Inspector** terminal window that logs WebSocket traffic and events:
 
 | Tool Name | Action Description | Purpose |
 |---|---|---|
-| `list_events` | 🔍 Checking Schedule & Conflict Detection | Queries Google Calendar for events within a time window to detect overlaps. |
-| `create_event` | 📅 Booking New Calendar Event | Creates a new calendar event with start/end time and summary. |
-| `update_event` | ✏️ Updating Existing Calendar Event | Patches an existing event by ID (time shift, title change). |
-| `delete_event` | 🗑️ Deleting Calendar Event | Permanently removes an event by ID. |
+| `list_events` | 🔍 to find events | Queries Google Calendar for events within a time window to detect overlaps. |
+| `create_event` | 📅 to create an event | Creates a new calendar event with start/end time and summary. |
+| `update_event` | ✏️ to update an event | Patches an existing event by ID (time shift, title change). |
+| `delete_event` | 🗑️ to delete an event | Permanently removes an event by ID. |
+
+*(Note: Creating, updating, or deleting an event automatically triggers the Google Calendar iframe to refresh.)*
 
 ---
 
@@ -228,18 +160,9 @@ The dashboard includes a Claude Code-style **Agent Tool & Telemetry Inspector** 
 
 | Layer | Technology | Purpose |
 |---|---|---|
-| **Framework** | Next.js 16 (App Router, Turbopack) | Full-stack React framework with serverless API routes |
-| **Language** | TypeScript | Type safety across client and server code |
-| **Authentication** | NextAuth.js v4 (Google Provider) | OAuth 2.0 login with Google Calendar scope |
-| **LLM** | Google Gemini 3.5 Flash Lite (`gemini-3.5-flash-lite`) | Natural language understanding and tool calling |
-| **Calendar** | Google Calendar API v3 (`googleapis`) | CRUD operations on user calendar events |
-| **Speech-to-Text** | Google Cloud Speech-to-Text v1 | Transcribes audio blobs to text |
-| **Text-to-Speech** | Google Cloud Text-to-Speech (OGG_OPUS) | Synthesizes response text into spoken audio |
-| **Styling** | Tailwind CSS v4 | Utility-first CSS |
-| **Containerization** | Docker + Google Cloud Run | Serverless production deployment |
-| **Silence Detection** | Adaptive RMS AudioContext | Dynamic ambient noise calibration for pause detection |
-
----
-
-
-
+| **Frontend Framework** | Next.js 15 | React framework, UI dashboard, and Google Auth |
+| **Backend Framework** | FastAPI (Python) | High-performance WebSocket proxy for Gemini Live API |
+| **Authentication** | NextAuth.js (Google Provider) | OAuth 2.0 login with Google Calendar scopes |
+| **LLM** | Gemini Multimodal Live API | Low-latency streaming voice and tool interactions |
+| **Audio Processing** | AudioWorklet / Web Audio API | In-browser 16kHz capture and 24kHz playback |
+| **Styling** | Tailwind CSS | Utility-first CSS framework |
