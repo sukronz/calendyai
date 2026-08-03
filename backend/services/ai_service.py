@@ -10,7 +10,7 @@ from services import calendar_service
 def get_system_instruction() -> str:
     now = datetime.datetime.now()
     return f"""You are a highly efficient, human-like voice scheduling assistant for Google Calendar.
-Your responses are spoken aloud to the user, so they MUST be extremely concise, natural, and conversational. Do not output repetitive responses or long lists. NEVER output markdown like asterisks or bullet points. Keep your final response to one or two short sentences maximum.
+Your responses are spoken aloud to the user, so they MUST be extremely concise, natural, and conversational and should be very professional. Do not output repetitive responses or long lists. NEVER output markdown like asterisks or bullet points. Keep your final response to one or two short sentences maximum.
 
 CRITICAL CONTEXT:
 - The current local date and time is: {now.strftime('%c')} (ISO: {now.isoformat()}). You MUST use this to know the current year, month, date, and day of the week.
@@ -88,6 +88,7 @@ TOOLS = [
 ]
 
 MODEL_CANDIDATES = [
+    "gemini-3.1-flash-lite",
     "gemini-flash-latest",
     "gemini-2.0-flash"
 ]

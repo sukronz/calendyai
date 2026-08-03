@@ -38,17 +38,21 @@ export default function Home() {
     {
       id: "init-2",
       stage: "info",
-      message: "Engine: Gemini 3.5 Flash Lite + Google Calendar API Tools.",
+      message: "Engine: Gemini Live Prototype + Google Calendar API Tools.",
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     }
   ]);
   const [refreshKey, setRefreshKey] = useState(Date.now());
-  const [isListening, setIsListening] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isLiveStreaming, setIsLiveStreaming] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
   const [inputText, setInputText] = useState("");
 
   const logContainerRef = useRef<HTMLDivElement>(null);
-  const recognitionRef = useRef<any>(null);
+
+  const wsRef = useRef<WebSocket | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const nextPlayTimeRef = useRef<number>(0);
 
   const addLog = (stage: AgentLog["stage"], message: string) => {
     const newLog: AgentLog = {
@@ -72,294 +76,172 @@ export default function Home() {
     }
   }, [logs, agentStage]);
 
-  useEffect(() => {
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      window.speechSynthesis.getVoices();
-      window.speechSynthesis.onvoiceschanged = () => {
-        window.speechSynthesis.getVoices();
+  const connectWebSocket = () => {
+    if (wsRef.current) return;
+
+    addLog("info", "Connecting to Gemini Live WebSocket...");
+    const ws = new WebSocket("ws://localhost:8000/ws/live");
+    wsRef.current = ws;
+
+    let heartbeatTimer: any = null;
+
+    ws.onopen = () => {
+      setIsConnected(true);
+      addLog("info", "Connected to Gemini Live Bridge");
+      ws.send(JSON.stringify({ type: "INIT", accessToken: (session as any)?.accessToken || "" }));
+
+      heartbeatTimer = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "PING" }));
+        }
+      }, 8000);
+    };
+
+    ws.onmessage = async (event) => {
+      if (typeof event.data === "string") {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.type === "READY") {
+            addLog("info", "Gemini Multimodal Live API session active.");
+            setAgentStage("STANDBY");
+          } else if (payload.type === "TEXT_CHUNK") {
+            setAgentStage("SPEAKING");
+          } else if (payload.type === "TURN_COMPLETE") {
+            addLog("info", "⚡ Native Agent End-of-Turn (turnComplete) detected.");
+            if (isLiveStreaming) {
+              setAgentStage("LISTENING");
+            } else {
+              setAgentStage("STANDBY");
+            }
+          } else if (payload.type === "TOOL_LOG") {
+            let toolDescription = "to interact with calendar";
+            if (payload.tool === "list_events") toolDescription = "to find events";
+            if (payload.tool === "create_event") toolDescription = "to create an event";
+            if (payload.tool === "update_event") toolDescription = "to update an event";
+            if (payload.tool === "delete_event") toolDescription = "to delete an event";
+
+            setAgentStage("EXECUTING_TOOL");
+            addLog("tool_call", `Agent called ${payload.tool.replace("_", " ")} tool ${toolDescription}`);
+            // addLog("tool_result", `${payload.tool} result: ${JSON.stringify(payload.result)}`); // User requested not to show full results
+            // Auto-refresh calendar for mutating tools
+            if (payload.tool !== "list_events") {
+              setRefreshKey(Date.now());
+              addLog("info", "🔄 Calendar embedded view refreshed.");
+            }
+          } else if (payload.type === "ERROR") {
+            addLog("error", `Live Error: ${payload.error}`);
+            setAgentStage("STANDBY");
+          }
+        } catch (e) {}
+      } else if (event.data instanceof Blob) {
+        // Play 24kHz incoming PCM audio from Gemini
+        setAgentStage("SPEAKING");
+        playAudioBufferChunk(await event.data.arrayBuffer());
+      }
+    };
+
+    ws.onclose = () => {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      setIsConnected(false);
+      setIsLiveStreaming(false);
+      setAgentStage("STANDBY");
+      addLog("info", "WebSocket closed.");
+      wsRef.current = null;
+    };
+
+    ws.onerror = (err) => {
+      addLog("error", "WebSocket connection error. Check API Permissions.");
+    };
+  };
+
+  const playAudioBufferChunk = (arrayBuffer: ArrayBuffer) => {
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      nextPlayTimeRef.current = audioCtxRef.current.currentTime;
+    }
+    const audioCtx = audioCtxRef.current;
+    
+    if (audioCtx.state === "suspended") {
+      audioCtx.resume();
+    }
+
+    const int16 = new Int16Array(arrayBuffer);
+    const float32 = new Float32Array(int16.length);
+    for (let i = 0; i < int16.length; i++) {
+      float32[i] = int16[i] / 32768.0;
+    }
+
+    const audioBuffer = audioCtx.createBuffer(1, float32.length, 24000);
+    audioBuffer.getChannelData(0).set(float32);
+
+    const source = audioCtx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(audioCtx.destination);
+
+    const startTime = Math.max(audioCtx.currentTime, nextPlayTimeRef.current);
+    source.start(startTime);
+    nextPlayTimeRef.current = startTime + audioBuffer.duration;
+  };
+
+  const startLiveStreaming = async () => {
+    if (!isConnected) {
+      connectWebSocket();
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } });
+      mediaStreamRef.current = stream;
+
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      audioCtxRef.current = audioCtx;
+
+      await audioCtx.audioWorklet.addModule("/pcm_processor.js");
+      const sourceNode = audioCtx.createMediaStreamSource(stream);
+      const pcmWorklet = new AudioWorkletNode(audioCtx, "pcm-processor");
+
+      pcmWorklet.port.onmessage = (event) => {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(event.data);
+        }
       };
-    }
-  }, []);
 
-  const speakText = (text: string, onEnd?: () => void) => {
-    if (!('speechSynthesis' in window)) {
-      if (onEnd) onEnd();
-      return;
-    }
-
-    window.speechSynthesis.cancel();
-    const cleanText = text.replace(/[*#]/g, "");
-    const utterance = new SpeechSynthesisUtterance(cleanText);
-    utterance.rate = 1.05;
-    utterance.pitch = 1.0;
-
-    // Load available voices and strictly select female English voices
-    const voices = window.speechSynthesis.getVoices();
-    const femaleNames = [
-      "google uk english female",
-      "samantha",
-      "victoria",
-      "karen",
-      "zira",
-      "jenny",
-      "aria",
-      "fiona",
-      "moira",
-      "veena",
-      "tessa"
-    ];
-    const maleKeywords = ["male", "daniel", "alex", "fred", "george", "david", "mark", "oliver", "rishi"];
-
-    const femaleVoice = voices.find(v =>
-      v.lang.startsWith("en") &&
-      (femaleNames.some(name => v.name.toLowerCase().includes(name)) || v.name.toLowerCase().includes("female"))
-    ) || voices.find(v =>
-      v.lang.startsWith("en") &&
-      !maleKeywords.some(m => v.name.toLowerCase().includes(m))
-    ) || voices.find(v => v.lang.startsWith("en"));
-
-    if (femaleVoice) {
-      utterance.voice = femaleVoice;
-    }
-    utterance.pitch = 1.1; // Slightly higher pitch for natural female vocal tone
-
-    utterance.onstart = () => {
-      setIsSpeaking(true);
-      setAgentStage("SPEAKING");
-      addLog("tts", `Speaking: "${cleanText}"`);
-      // Start active background listening for automatic barge-in while speaking
-      startListening(true);
-    };
-
-    utterance.onend = () => {
-      setIsSpeaking(false);
-      setAgentStage("STANDBY");
-      addLog("info", "Agent finished speaking.");
-      if (onEnd) onEnd();
-    };
-
-    utterance.onerror = (e) => {
-      console.error("SpeechSynthesis error:", e);
-      setIsSpeaking(false);
-      setAgentStage("STANDBY");
-      if (onEnd) onEnd();
-    };
-
-    window.speechSynthesis.speak(utterance);
-  };
-
-  const stopSpeaking = () => {
-    if (typeof window !== "undefined" && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      setIsSpeaking(false);
-      setAgentStage("STANDBY");
-      addLog("info", "⚡ User Barge-In: Speech synthesis canceled instantly.");
-    }
-  };
-
-  const isMicExplicitlyActiveRef = useRef(false);
-  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const isProcessingTurnRef = useRef<boolean>(false);
-
-  const startListening = (isBargeInListener: boolean = false) => {
-    if (!isBargeInListener) {
-      isMicExplicitlyActiveRef.current = true;
-    }
-
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      if (!isBargeInListener) {
-        alert("Speech recognition is not supported in this browser. Please use Chrome.");
-      }
-      return;
-    }
-
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch (e) { }
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true; // Always listen continuously
-    recognition.interimResults = true;
-    recognition.lang = "en-US";
-    recognitionRef.current = recognition;
-
-    let finalTranscript = "";
-
-    recognition.onstart = () => {
-      setIsListening(true);
-      if (!isBargeInListener) {
-        setAgentStage("LISTENING");
-        addLog("stt", "Continuous Microphone Active. Speak anytime!");
-      }
-    };
-
-    // Feature 2: Auto Voice Detection on Speech Start -> Halt Agent Speech Immediately
-    recognition.onspeechstart = () => {
-      if (typeof window !== "undefined" && (window.speechSynthesis.speaking || isSpeaking)) {
-        window.speechSynthesis.cancel();
-        setIsSpeaking(false);
-        setAgentStage("LISTENING");
-        addLog("info", "⚡ Auto Voice Detection Barge-In: User speech detected — halting agent speech!");
-      }
-    };
-
-    recognition.onresult = (event: any) => {
-      // Feature 2: Auto Voice Detection Barge-In on Result
-      if (typeof window !== "undefined" && (window.speechSynthesis.speaking || isSpeaking)) {
-        window.speechSynthesis.cancel();
-        setIsSpeaking(false);
-        setAgentStage("LISTENING");
-        addLog("info", "⚡ Auto Voice Detection Barge-In: User speech detected — halting agent speech!");
-      }
-
-      let interim = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          finalTranscript += transcript;
-        } else {
-          interim += transcript;
-        }
-      }
-
-      const currentText = (finalTranscript || interim).trim();
-      setInputText(currentText);
-
-      // Feature 1: Auto Silence Detection when User is Speaking -> Triggers LLM automatically!
-      if (silenceTimerRef.current) {
-        clearTimeout(silenceTimerRef.current);
-      }
-
-      if (currentText.length > 0 && !isProcessingTurnRef.current) {
-        silenceTimerRef.current = setTimeout(() => {
-          if (currentText.length > 0 && !isProcessingTurnRef.current) {
-            isProcessingTurnRef.current = true;
-            addLog("stt", `STT Auto Silence: "${currentText}"`);
-            addLog("info", "⚡ Auto Silence Detected — Submitting to LLM Agent...");
-
-            const textToSubmit = currentText;
-            setInputText("");
-            finalTranscript = "";
-
-            processText(textToSubmit).finally(() => {
-              isProcessingTurnRef.current = false;
-            });
-          }
-        }, 650); // 650ms silence detection threshold
-      }
-    };
-
-    recognition.onerror = (event: any) => {
-      if (event.error !== "no-speech" && event.error !== "aborted") {
-        console.error("Speech recognition error:", event.error);
-        addLog("error", `STT error: ${event.error}`);
-      }
-
-      // If user has not clicked stop, restart listening loop seamlessly
-      if (isMicExplicitlyActiveRef.current) {
-        setTimeout(() => {
-          if (isMicExplicitlyActiveRef.current) {
-            try { recognition.start(); } catch (e) { }
-          }
-        }, 300);
-      } else {
-        setIsListening(false);
-        if (!isBargeInListener) {
-          setAgentStage("STANDBY");
-        }
-      }
-    };
-
-    recognition.onend = () => {
-      if (finalTranscript.trim() && !isProcessingTurnRef.current) {
-        addLog("stt", `STT: "${finalTranscript.trim()}"`);
-        isProcessingTurnRef.current = true;
-        processText(finalTranscript.trim()).finally(() => {
-          isProcessingTurnRef.current = false;
-        });
-      }
-
-      // Keep mic active continuously until user explicitly stops it!
-      if (isMicExplicitlyActiveRef.current) {
-        setIsListening(true);
-        setTimeout(() => {
-          if (isMicExplicitlyActiveRef.current) {
-            try { recognition.start(); } catch (e) { }
-          }
-        }, 200);
-      } else {
-        setIsListening(false);
-        if (!isBargeInListener) {
-          setAgentStage("STANDBY");
-        }
-      }
-    };
-
-    try {
-      recognition.start();
-    } catch (e) { }
-  };
-
-  const stopListening = () => {
-    isMicExplicitlyActiveRef.current = false;
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch (e) { }
-    }
-    setIsListening(false);
-    setAgentStage("STANDBY");
-    addLog("info", "Microphone stopped by user.");
-  };
-
-  const processText = async (text: string) => {
-    setAgentStage("THINKING_LLM");
-    addLog("llm", `Gemini 3.5 Flash Lite thinking...`);
-
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text })
-      });
-
-      const data = await res.json();
-
-      if (data.toolLogs && data.toolLogs.length > 0) {
-        data.toolLogs.forEach((log: any) => {
-          let toolDescription = "Calendar Tool Execution";
-          if (log.tool === "list_events") toolDescription = "Checking Schedule & Conflict Detection";
-          if (log.tool === "create_event") toolDescription = "Booking New Calendar Event";
-          if (log.tool === "update_event") toolDescription = "Updating Existing Calendar Event";
-          if (log.tool === "delete_event") toolDescription = "Deleting Calendar Event";
-
-          setAgentStage("EXECUTING_TOOL");
-          addLog("tool_call", `${log.tool} called — ${toolDescription}`);
-          addLog("tool_result", `${log.tool} finished`);
-        });
-        setRefreshKey(Date.now());
-      }
-
-      if (data.reply) {
-        addLog("llm", `Response: "${data.reply}"`);
-        speakText(data.reply);
-      } else if (data.error) {
-        addLog("error", `Error: ${data.error}`);
-        setAgentStage("STANDBY");
-      }
+      sourceNode.connect(pcmWorklet);
+      setIsLiveStreaming(true);
+      setAgentStage("LISTENING");
+      addLog("info", "Microphone streaming raw 16kHz PCM audio to Gemini Live API...");
     } catch (err: any) {
-      addLog("error", `Process error: ${err.message}`);
-      setAgentStage("STANDBY");
+      console.error("Mic error:", err);
+      addLog("error", `Microphone Error: ${err.message}`);
     }
   };
+
+  const stopLiveStreaming = () => {
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(t => t.stop());
+      mediaStreamRef.current = null;
+    }
+    setIsLiveStreaming(false);
+    setAgentStage("STANDBY");
+    addLog("info", "Microphone streaming stopped.");
+  };
+
+  useEffect(() => {
+    if (status === "authenticated") {
+      connectWebSocket();
+    }
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, [status]);
 
   const handleTextSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputText.trim()) return;
-
-    const text = inputText.trim();
+    if (!inputText.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    
+    addLog("llm", `Text Input: "${inputText}"`);
     setInputText("");
-    addLog("info", `Text directive: "${text}"`);
-    await processText(text);
   };
 
   if (status === "loading") {
@@ -386,6 +268,11 @@ export default function Home() {
         </div>
 
         <div className="flex items-center gap-6 text-xs font-bold uppercase tracking-wider text-[#121212]">
+          <span className={`hidden sm:inline px-2.5 py-1 text-[10px] font-black uppercase tracking-widest border-2 border-[#121212] shadow-[2px_2px_0px_0px_#121212] ${
+            isConnected ? "bg-green-400 text-[#121212]" : "bg-red-400 text-white"
+          }`}>
+            {isConnected ? "WS CONNECTED" : "WS DISCONNECTED"}
+          </span>
           <div className="hidden sm:flex items-center gap-2 bg-[#F0C020] border-2 border-[#121212] px-3 py-1 shadow-[2px_2px_0px_0px_#121212]">
             <div className="h-2.5 w-2.5 rounded-full bg-[#D02020] border border-[#121212]"></div>
             {session.user?.email}
@@ -455,15 +342,16 @@ export default function Home() {
                   STAGE:
                 </span>
               </div>
-              <span className={`text-xs font-mono font-black uppercase tracking-widest px-2.5 py-0.5 rounded-none border border-white/20 ${agentStage === "LISTENING"
-                ? "bg-[#D02020] text-white animate-pulse"
-                : agentStage === "THINKING_LLM"
-                  ? "bg-[#F0C020] text-[#121212]"
-                  : agentStage === "EXECUTING_TOOL"
-                    ? "bg-[#1040C0] text-white"
-                    : agentStage === "SPEAKING"
-                      ? "bg-purple-600 text-white"
-                      : "bg-green-600 text-white"
+              <span className={`text-xs font-mono font-black uppercase tracking-widest px-2.5 py-0.5 rounded-none border border-white/20 ${
+                agentStage === "LISTENING"
+                  ? "bg-[#D02020] text-white animate-pulse"
+                  : agentStage === "THINKING_LLM"
+                    ? "bg-[#F0C020] text-[#121212]"
+                    : agentStage === "EXECUTING_TOOL"
+                      ? "bg-[#1040C0] text-white"
+                      : agentStage === "SPEAKING"
+                        ? "bg-purple-600 text-white"
+                        : "bg-green-600 text-white"
                 }`}>
                 {agentStage}
               </span>
@@ -486,12 +374,13 @@ export default function Home() {
                   <div key={log.id} className="text-left leading-relaxed border-l-2 pl-2.5 py-0.5 border-white/15">
                     <div className="flex items-center gap-2 text-[10px] text-white/40">
                       <span>[{log.timestamp}]</span>
-                      <span className={`font-bold uppercase ${log.stage === "stt" ? "text-yellow-400" :
+                      <span className={`font-bold uppercase ${
+                        log.stage === "stt" ? "text-yellow-400" :
                         log.stage === "llm" ? "text-cyan-400" :
-                          log.stage === "tool_call" ? "text-pink-400 font-black" :
-                            log.stage === "tool_result" ? "text-green-400 font-black" :
-                              log.stage === "tts" ? "text-purple-400" :
-                                log.stage === "error" ? "text-red-500 font-bold" : "text-gray-300"
+                        log.stage === "tool_call" ? "text-pink-400 font-black" :
+                        log.stage === "tool_result" ? "text-green-400 font-black" :
+                        log.stage === "tts" ? "text-purple-400" :
+                        log.stage === "error" ? "text-red-500 font-bold" : "text-gray-300"
                         }`}>
                         [{log.stage.toUpperCase()}]
                       </span>
@@ -513,7 +402,6 @@ export default function Home() {
               </div>
             </div>
           </div>
-
         </div>
 
         {/* Voice Floating Dock */}
@@ -521,32 +409,25 @@ export default function Home() {
           <div className="flex items-center gap-4 px-4 py-3 rounded-none bg-[#F0C020] border-4 border-[#121212] shadow-[6px_6px_0px_0px_#121212] transition-all">
             <button
               type="button"
-              onClick={() => {
-                if (isSpeaking) {
-                  stopSpeaking();
-                } else if (isListening) {
-                  stopListening();
-                } else {
-                  startListening(false);
-                }
-              }}
-              className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-none border-2 border-[#121212] transition-all shadow-[3px_3px_0px_0px_#121212] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer ${isListening
-                ? "bg-[#D02020] text-white animate-pulse"
-                : isSpeaking
-                  ? "bg-[#D02020] text-white animate-bounce"
-                  : "bg-white text-[#121212] hover:bg-[#F0F0F0]"
+              onClick={isLiveStreaming ? stopLiveStreaming : startLiveStreaming}
+              className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-none border-2 border-[#121212] transition-all shadow-[3px_3px_0px_0px_#121212] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer ${
+                isLiveStreaming
+                  ? "bg-[#D02020] text-white animate-pulse"
+                  : agentStage === "SPEAKING"
+                    ? "bg-[#1040C0] text-white animate-bounce"
+                    : "bg-white text-[#121212] hover:bg-[#F0F0F0]"
                 }`}
             >
-              {isListening ? (
+              {isLiveStreaming ? (
                 <Square className="h-5 w-5 fill-current" />
-              ) : isSpeaking ? (
+              ) : agentStage === "SPEAKING" ? (
                 <Sparkles className="h-5 w-5 animate-spin" />
               ) : (
                 <Mic className="h-5 w-5" />
               )}
             </button>
 
-            {isSpeaking && (
+            {agentStage === "SPEAKING" && (
               <div className="flex items-center justify-center gap-[4px] h-6 w-10 shrink-0 pr-2">
                 <div className="w-[4px] bg-[#121212] rounded-none h-full animate-bounce"></div>
                 <div className="w-[4px] bg-[#D02020] rounded-none h-full animate-bounce delay-100"></div>
@@ -561,8 +442,8 @@ export default function Home() {
                 type="text"
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
-                placeholder={isListening ? "LISTENING..." : isSpeaking ? "SPEAKING..." : "TYPE OR TAP MIC..."}
-                disabled={isListening || isSpeaking}
+                placeholder={isLiveStreaming ? "STREAMING AUDIO..." : agentStage === "SPEAKING" ? "AGENT SPEAKING..." : "TYPE OR TAP MIC TO STREAM..."}
+                disabled={isLiveStreaming || agentStage === "SPEAKING"}
                 className="flex-1 bg-transparent border-none text-xs font-bold uppercase text-[#121212] focus:outline-none placeholder:text-[#121212]/50"
               />
             </form>
