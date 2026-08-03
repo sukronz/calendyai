@@ -72,6 +72,15 @@ export default function Home() {
     }
   }, [logs, agentStage]);
 
+  useEffect(() => {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.getVoices();
+      };
+    }
+  }, []);
+
   const speakText = (text: string, onEnd?: () => void) => {
     if (!('speechSynthesis' in window)) {
       if (onEnd) onEnd();
@@ -84,10 +93,42 @@ export default function Home() {
     utterance.rate = 1.05;
     utterance.pitch = 1.0;
 
+    // Load available voices and strictly select female English voices
+    const voices = window.speechSynthesis.getVoices();
+    const femaleNames = [
+      "google uk english female",
+      "samantha",
+      "victoria",
+      "karen",
+      "zira",
+      "jenny",
+      "aria",
+      "fiona",
+      "moira",
+      "veena",
+      "tessa"
+    ];
+    const maleKeywords = ["male", "daniel", "alex", "fred", "george", "david", "mark", "oliver", "rishi"];
+
+    const femaleVoice = voices.find(v =>
+      v.lang.startsWith("en") &&
+      (femaleNames.some(name => v.name.toLowerCase().includes(name)) || v.name.toLowerCase().includes("female"))
+    ) || voices.find(v =>
+      v.lang.startsWith("en") &&
+      !maleKeywords.some(m => v.name.toLowerCase().includes(m))
+    ) || voices.find(v => v.lang.startsWith("en"));
+
+    if (femaleVoice) {
+      utterance.voice = femaleVoice;
+    }
+    utterance.pitch = 1.1; // Slightly higher pitch for natural female vocal tone
+
     utterance.onstart = () => {
       setIsSpeaking(true);
       setAgentStage("SPEAKING");
       addLog("tts", `Speaking: "${cleanText}"`);
+      // Start active background listening for automatic barge-in while speaking
+      startListening(true);
     };
 
     utterance.onend = () => {
@@ -107,19 +148,38 @@ export default function Home() {
     window.speechSynthesis.speak(utterance);
   };
 
-  const startListening = () => {
+  const stopSpeaking = () => {
+    if (typeof window !== "undefined" && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      setAgentStage("STANDBY");
+      addLog("info", "⚡ User Barge-In: Speech synthesis canceled instantly.");
+    }
+  };
+
+  const isMicExplicitlyActiveRef = useRef(false);
+  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isProcessingTurnRef = useRef<boolean>(false);
+
+  const startListening = (isBargeInListener: boolean = false) => {
+    if (!isBargeInListener) {
+      isMicExplicitlyActiveRef.current = true;
+    }
+
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert("Speech recognition is not supported in this browser. Please use Chrome.");
+      if (!isBargeInListener) {
+        alert("Speech recognition is not supported in this browser. Please use Chrome.");
+      }
       return;
     }
 
     if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch (e) {}
+      try { recognitionRef.current.stop(); } catch (e) { }
     }
 
     const recognition = new SpeechRecognition();
-    recognition.continuous = false;
+    recognition.continuous = true; // Always listen continuously
     recognition.interimResults = true;
     recognition.lang = "en-US";
     recognitionRef.current = recognition;
@@ -128,11 +188,31 @@ export default function Home() {
 
     recognition.onstart = () => {
       setIsListening(true);
-      setAgentStage("LISTENING");
-      addLog("stt", "Listening... Speak your request.");
+      if (!isBargeInListener) {
+        setAgentStage("LISTENING");
+        addLog("stt", "Continuous Microphone Active. Speak anytime!");
+      }
+    };
+
+    // Feature 2: Auto Voice Detection on Speech Start -> Halt Agent Speech Immediately
+    recognition.onspeechstart = () => {
+      if (typeof window !== "undefined" && (window.speechSynthesis.speaking || isSpeaking)) {
+        window.speechSynthesis.cancel();
+        setIsSpeaking(false);
+        setAgentStage("LISTENING");
+        addLog("info", "⚡ Auto Voice Detection Barge-In: User speech detected — halting agent speech!");
+      }
     };
 
     recognition.onresult = (event: any) => {
+      // Feature 2: Auto Voice Detection Barge-In on Result
+      if (typeof window !== "undefined" && (window.speechSynthesis.speaking || isSpeaking)) {
+        window.speechSynthesis.cancel();
+        setIsSpeaking(false);
+        setAgentStage("LISTENING");
+        addLog("info", "⚡ Auto Voice Detection Barge-In: User speech detected — halting agent speech!");
+      }
+
       let interim = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
@@ -142,35 +222,93 @@ export default function Home() {
           interim += transcript;
         }
       }
-      setInputText(finalTranscript || interim);
-    };
 
-    recognition.onerror = (event: any) => {
-      console.error("Speech recognition error:", event.error);
-      addLog("error", `STT error: ${event.error}`);
-      setIsListening(false);
-      setAgentStage("STANDBY");
-    };
+      const currentText = (finalTranscript || interim).trim();
+      setInputText(currentText);
 
-    recognition.onend = () => {
-      setIsListening(false);
-      if (finalTranscript.trim()) {
-        addLog("stt", `STT: "${finalTranscript.trim()}"`);
-        processText(finalTranscript.trim());
-      } else {
-        addLog("info", "No speech detected.");
-        setAgentStage("STANDBY");
+      // Feature 1: Auto Silence Detection when User is Speaking -> Triggers LLM automatically!
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+      }
+
+      if (currentText.length > 0 && !isProcessingTurnRef.current) {
+        silenceTimerRef.current = setTimeout(() => {
+          if (currentText.length > 0 && !isProcessingTurnRef.current) {
+            isProcessingTurnRef.current = true;
+            addLog("stt", `STT Auto Silence: "${currentText}"`);
+            addLog("info", "⚡ Auto Silence Detected — Submitting to LLM Agent...");
+
+            const textToSubmit = currentText;
+            setInputText("");
+            finalTranscript = "";
+
+            processText(textToSubmit).finally(() => {
+              isProcessingTurnRef.current = false;
+            });
+          }
+        }, 650); // 650ms silence detection threshold
       }
     };
 
-    recognition.start();
+    recognition.onerror = (event: any) => {
+      if (event.error !== "no-speech" && event.error !== "aborted") {
+        console.error("Speech recognition error:", event.error);
+        addLog("error", `STT error: ${event.error}`);
+      }
+
+      // If user has not clicked stop, restart listening loop seamlessly
+      if (isMicExplicitlyActiveRef.current) {
+        setTimeout(() => {
+          if (isMicExplicitlyActiveRef.current) {
+            try { recognition.start(); } catch (e) { }
+          }
+        }, 300);
+      } else {
+        setIsListening(false);
+        if (!isBargeInListener) {
+          setAgentStage("STANDBY");
+        }
+      }
+    };
+
+    recognition.onend = () => {
+      if (finalTranscript.trim() && !isProcessingTurnRef.current) {
+        addLog("stt", `STT: "${finalTranscript.trim()}"`);
+        isProcessingTurnRef.current = true;
+        processText(finalTranscript.trim()).finally(() => {
+          isProcessingTurnRef.current = false;
+        });
+      }
+
+      // Keep mic active continuously until user explicitly stops it!
+      if (isMicExplicitlyActiveRef.current) {
+        setIsListening(true);
+        setTimeout(() => {
+          if (isMicExplicitlyActiveRef.current) {
+            try { recognition.start(); } catch (e) { }
+          }
+        }, 200);
+      } else {
+        setIsListening(false);
+        if (!isBargeInListener) {
+          setAgentStage("STANDBY");
+        }
+      }
+    };
+
+    try {
+      recognition.start();
+    } catch (e) { }
   };
 
   const stopListening = () => {
+    isMicExplicitlyActiveRef.current = false;
     if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch (e) {}
+      try { recognitionRef.current.stop(); } catch (e) { }
     }
     setIsListening(false);
+    setAgentStage("STANDBY");
+    addLog("info", "Microphone stopped by user.");
   };
 
   const processText = async (text: string) => {
@@ -383,10 +521,20 @@ export default function Home() {
           <div className="flex items-center gap-4 px-4 py-3 rounded-none bg-[#F0C020] border-4 border-[#121212] shadow-[6px_6px_0px_0px_#121212] transition-all">
             <button
               type="button"
-              onClick={isListening ? stopListening : startListening}
+              onClick={() => {
+                if (isSpeaking) {
+                  stopSpeaking();
+                } else if (isListening) {
+                  stopListening();
+                } else {
+                  startListening(false);
+                }
+              }}
               className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-none border-2 border-[#121212] transition-all shadow-[3px_3px_0px_0px_#121212] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer ${isListening
                 ? "bg-[#D02020] text-white animate-pulse"
-                : "bg-white text-[#121212] hover:bg-[#F0F0F0]"
+                : isSpeaking
+                  ? "bg-[#D02020] text-white animate-bounce"
+                  : "bg-white text-[#121212] hover:bg-[#F0F0F0]"
                 }`}
             >
               {isListening ? (

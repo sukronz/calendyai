@@ -40,6 +40,12 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# python
+backend/venv/
+.venv/
+__pycache__/
+*.pyc
+
 # Markdown files
 *.md
 !README.md
