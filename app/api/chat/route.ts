@@ -123,17 +123,29 @@ export async function POST(req: Request) {
       }
     }
 
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.0-flash",
-      systemInstruction,
-      tools
-    });
-
+    const candidateModels = ["gemini-3.5-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash-lite", "gemini-3.5-flash"];
+    let response: any = null;
+    let chat: any = null;
     const toolLogs: any[] = [];
-    const chat = model.startChat();
 
-    let result = await chat.sendMessage(contents);
-    let response = await result.response;
+    for (const modelName of candidateModels) {
+      try {
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          systemInstruction,
+          tools
+        });
+        chat = model.startChat();
+        let res = await chat.sendMessage(contents);
+        response = await res.response;
+        break; // Successfully got response
+      } catch (err: any) {
+        console.warn(`[Model ${modelName} failed]:`, err.message);
+        if (candidateModels.indexOf(modelName) === candidateModels.length - 1) {
+          throw err; // throw if all candidates fail
+        }
+      }
+    }
 
     // Handle tool calls in a loop
     while (response.functionCalls() && response.functionCalls()!.length > 0) {
@@ -168,8 +180,8 @@ export async function POST(req: Request) {
         });
       }
 
-      result = await chat.sendMessage(functionResponses);
-      response = await result.response;
+      const res = await chat.sendMessage(functionResponses);
+      response = await res.response;
     }
 
     const reply = response.text() || "I have processed your request.";
