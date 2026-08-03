@@ -14,6 +14,8 @@ import {
   Trash2,
 } from "lucide-react";
 
+import LiveVoiceStream from "@/components/LiveVoiceStream";
+
 interface AgentLog {
   id: string;
   stage: "stt" | "llm" | "tool_call" | "tool_result" | "tts" | "info" | "error";
@@ -27,6 +29,7 @@ export default function Home() {
   const { data: session, status } = useSession();
   const router = useRouter();
 
+  const [activeMode, setActiveMode] = useState<"standard" | "live">("standard");
   const [agentStage, setAgentStage] = useState<AgentStage>("STANDBY");
   const [logs, setLogs] = useState<AgentLog[]>([
     {
@@ -383,6 +386,32 @@ export default function Home() {
             <div className="w-0 h-0 border-l-[8px] border-l-transparent border-r-[8px] border-r-transparent border-b-[14px] border-b-[#F0C020]"></div>
           </div>
           CALENDY<span className="text-[#D02020]">.AI</span>
+
+          {/* Engine Mode Toggle */}
+          <div className="flex items-center gap-2 ml-6 text-xs font-mono font-black">
+            <button
+              type="button"
+              onClick={() => setActiveMode("standard")}
+              className={`px-3 py-1 border-2 border-[#121212] transition-all cursor-pointer ${
+                activeMode === "standard"
+                  ? "bg-[#121212] text-white shadow-[2px_2px_0px_0px_#D02020]"
+                  : "bg-white text-[#121212] hover:bg-[#F0F0F0]"
+              }`}
+            >
+              STANDARD VAD ENGINE
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveMode("live")}
+              className={`px-3 py-1 border-2 border-[#121212] transition-all cursor-pointer ${
+                activeMode === "live"
+                  ? "bg-[#D02020] text-white shadow-[2px_2px_0px_0px_#121212]"
+                  : "bg-white text-[#121212] hover:bg-[#F0F0F0]"
+              }`}
+            >
+              ⚡ GEMINI LIVE PROTOTYPE
+            </button>
+          </div>
         </div>
 
         <div className="flex items-center gap-6 text-xs font-bold uppercase tracking-wider text-[#121212]">
@@ -430,9 +459,13 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Inspector Console (5 Cols) */}
+          {/* Inspector Console / Live Streaming Component (5 Cols) */}
           <div className="lg:col-span-5 flex flex-col space-y-3">
-            <div className="flex items-center justify-between border-b-2 border-[#121212] pb-2">
+            {activeMode === "live" ? (
+              <LiveVoiceStream accessToken={(session as any).accessToken || ""} />
+            ) : (
+              <>
+                <div className="flex items-center justify-between border-b-2 border-[#121212] pb-2">
               <div className="flex items-center gap-2 font-black text-xs sm:text-sm uppercase tracking-wider text-[#121212]">
                 <Terminal className="h-4 w-4 text-[#1040C0]" />
                 <span>AGENT TOOL & TELEMETRY INSPECTOR</span>
@@ -512,6 +545,8 @@ export default function Home() {
                 ))}
               </div>
             </div>
+            </>
+            )}
           </div>
 
         </div>

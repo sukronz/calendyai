@@ -32,6 +32,11 @@ async def voice_websocket_endpoint(websocket: WebSocket):
     from services.websocket_handler import handle_voice_websocket
     await handle_voice_websocket(websocket)
 
+@app.websocket("/ws/live")
+async def live_websocket_endpoint(websocket: WebSocket):
+    from services.gemini_live_service import handle_gemini_live_websocket
+    await handle_gemini_live_websocket(websocket)
+
 @app.get("/health")
 def health_check():
     return {"status": "ok", "service": "calendy-backend"}
