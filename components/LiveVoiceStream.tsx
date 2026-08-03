@@ -74,12 +74,20 @@ export default function LiveVoiceStream({ accessToken }: LiveVoiceStreamProps) {
     };
   };
 
+  const nextPlayTimeRef = useRef<number>(0);
+
   const playAudioBufferChunk = (arrayBuffer: ArrayBuffer) => {
     if (!audioCtxRef.current) {
       audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      nextPlayTimeRef.current = audioCtxRef.current.currentTime;
     }
     const audioCtx = audioCtxRef.current;
     
+    // Resume context if suspended by browser security policy
+    if (audioCtx.state === "suspended") {
+      audioCtx.resume();
+    }
+
     const int16 = new Int16Array(arrayBuffer);
     const float32 = new Float32Array(int16.length);
     for (let i = 0; i < int16.length; i++) {
@@ -92,7 +100,11 @@ export default function LiveVoiceStream({ accessToken }: LiveVoiceStreamProps) {
     const source = audioCtx.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(audioCtx.destination);
-    source.start(0);
+
+    // Schedule playback start time sequentially to prevent echo/overlap
+    const startTime = Math.max(audioCtx.currentTime, nextPlayTimeRef.current);
+    source.start(startTime);
+    nextPlayTimeRef.current = startTime + audioBuffer.duration;
   };
 
   const startLiveStreaming = async () => {

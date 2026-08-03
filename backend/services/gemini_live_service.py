@@ -78,6 +78,7 @@ async def handle_gemini_live_websocket(websocket: WebSocket):
                         msg = await websocket.receive()
                         if "bytes" in msg and msg["bytes"]:
                             pcm_data = msg["bytes"]
+                            print(f"[Gemini Live] Relaying {len(pcm_data)} bytes client audio -> Gemini")
                             await session.send_realtime_input(
                                 audio=types.Blob(data=pcm_data, mime_type="audio/pcm")
                             )
@@ -85,12 +86,14 @@ async def handle_gemini_live_websocket(websocket: WebSocket):
                             data = json.loads(msg["text"])
                             if data.get("type") == "TEXT_PROMPT":
                                 text_prompt = data.get("prompt", "")
+                                print(f"[Gemini Live] Sending text prompt: '{text_prompt}'")
                                 await session.send_client_content(
                                     turns=[types.Content(parts=[types.Part.from_text(text=text_prompt)])],
                                     turn_complete=True
                                 )
                 except (WebSocketDisconnect, asyncio.CancelledError):
-                    pass
+                    print("[Gemini Live] Client WebSocket disconnected (Client loop closed).")
+                    raise
 
             async def receive_from_gemini():
                 """Reads responses from Gemini Live Session and forwards audio & tools to client."""
@@ -102,14 +105,17 @@ async def handle_gemini_live_websocket(websocket: WebSocket):
                             if model_turn:
                                 for part in model_turn.parts:
                                     if part.inline_data:
+                                        print(f"[Gemini Live] Relaying {len(part.inline_data.data)} bytes audio response -> Client")
                                         await websocket.send_bytes(part.inline_data.data)
                                     elif part.text:
+                                        print(f"[Gemini Live] Model text output: {part.text}")
                                         await websocket.send_json({
                                             "type": "TEXT_CHUNK",
                                             "text": part.text
                                         })
 
                             if server_content.turn_complete:
+                                print("[Gemini Live] Model Turn Complete.")
                                 await websocket.send_json({"type": "TURN_COMPLETE"})
 
                         tool_call = response.tool_call
@@ -118,6 +124,7 @@ async def handle_gemini_live_websocket(websocket: WebSocket):
                             for call in tool_call.function_calls:
                                 name = call.name
                                 args = dict(call.args) if call.args else {}
+                                print(f"[Gemini Live] Tool call request: {name}({args})")
                                 result = {}
 
                                 try:
@@ -136,6 +143,7 @@ async def handle_gemini_live_websocket(websocket: WebSocket):
                                 except Exception as err:
                                     result = {"error": str(err)}
 
+                                print(f"[Gemini Live] Tool output result: {result}")
                                 await websocket.send_json({
                                     "type": "TOOL_LOG",
                                     "tool": name,
@@ -154,12 +162,27 @@ async def handle_gemini_live_websocket(websocket: WebSocket):
                             )
 
                 except (WebSocketDisconnect, asyncio.CancelledError):
-                    pass
+                    print("[Gemini Live] Client WebSocket disconnected (Gemini loop closed).")
+                    raise
 
-            await asyncio.gather(receive_from_client(), receive_from_gemini())
+            # Run client loop and Gemini loop concurrently; cancel sibling cleanly on disconnect
+            tasks = [
+                asyncio.create_task(receive_from_client()),
+                asyncio.create_task(receive_from_gemini())
+            ]
+            try:
+                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                for task in pending:
+                    task.cancel()
+            except Exception:
+                pass
 
-    except Exception as e:
+    except (WebSocketDisconnect, Exception) as e:
         err_msg = str(e)
+        if isinstance(e, WebSocketDisconnect) or "disconnect" in err_msg.lower():
+            print("[Gemini Live] Session closed by client disconnect.")
+            return
+
         if "1008" in err_msg or "bidiGenerateContent" in err_msg or "not found" in err_msg:
             user_err = "Gemini Multimodal Live API (bidiGenerateContent) requires a Billing-Enabled AI Studio Key or Google Cloud project. Please use the STANDARD VAD ENGINE tab for your key."
         else:
