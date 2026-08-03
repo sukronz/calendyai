@@ -4,7 +4,6 @@ import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
 import {
-  Send,
   Calendar as CalendarIcon,
   LogOut,
   Sparkles,
@@ -13,78 +12,52 @@ import {
   Terminal,
   Cpu,
   Trash2,
-  Wrench,
-  CheckCircle2,
-  Clock,
-  Volume2,
-  Activity
 } from "lucide-react";
 
 interface AgentLog {
   id: string;
   stage: "stt" | "llm" | "tool_call" | "tool_result" | "tts" | "info" | "error";
   message: string;
-  payload?: any;
   timestamp: string;
 }
 
-type AgentStage = "STANDBY" | "RECORDING_STT" | "THINKING_LLM" | "EXECUTING_TOOL" | "SYNTHESIZING_TTS";
+type AgentStage = "STANDBY" | "LISTENING" | "THINKING_LLM" | "EXECUTING_TOOL" | "SPEAKING";
 
 export default function Home() {
   const { data: session, status } = useSession();
   const router = useRouter();
 
-  const [messages, setMessages] = useState<{ role: "user" | "agent", content: string }[]>([
-    { role: "agent", content: "Hello! I am your AI scheduling assistant. Speak or type your request to manage your calendar." }
-  ]);
-  const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(Date.now());
-  const [isRecording, setIsRecording] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-
-  // Agent Execution Telemetry State
   const [agentStage, setAgentStage] = useState<AgentStage>("STANDBY");
   const [logs, setLogs] = useState<AgentLog[]>([
     {
       id: "init-1",
       stage: "info",
-      message: "CalendyAI Agent Telemetry Initialized.",
+      message: "CalendyAI Automated Turn-Taking Inspector Initialized.",
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     },
     {
       id: "init-2",
       stage: "info",
-      message: "Services online: Google STT, Gemini 3.5 Flash Lite, Google Calendar API Tools, Google TTS.",
+      message: "Multimodal Engine: Gemini 2.0 Flash with Native Audio & Calendar Tools.",
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     }
   ]);
+  const [refreshKey, setRefreshKey] = useState(Date.now());
+  const [isListening, setIsListening] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [inputText, setInputText] = useState("");
 
-  const chatContainerRef = useRef<HTMLDivElement>(null);
   const logContainerRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<BlobPart[]>([]);
-  const messagesRef = useRef<{ role: "user" | "agent", content: string }[]>([]);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const isListeningRef = useRef<boolean>(false);
+  const speechDetectedRef = useRef<boolean>(false);
 
-  // Silence detection refs
-  const silenceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const maxRecordingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const isRecordingRef = useRef<boolean>(false);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const hasSpokenRef = useRef<boolean>(false);
-  const silenceCheckIntervalRef = useRef<number | null>(null);
-
-  // Audio playback queue refs
-  const textQueueRef = useRef<string[]>([]);
-  const isPlayingRef = useRef<boolean>(false);
-
-  const addLog = (stage: AgentLog["stage"], message: string, payload?: any) => {
+  const addLog = (stage: AgentLog["stage"], message: string) => {
     const newLog: AgentLog = {
       id: Math.random().toString(36).substring(7),
       stage,
       message,
-      payload,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     };
     setLogs(prev => [...prev.slice(-49), newLog]);
@@ -97,326 +70,227 @@ export default function Home() {
   }, [status, router]);
 
   useEffect(() => {
-    messagesRef.current = messages;
-    if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTo({
-        top: chatContainerRef.current.scrollHeight,
-        behavior: "smooth"
-      });
-    }
-  }, [messages, refreshKey]);
-
-  useEffect(() => {
     if (logContainerRef.current) {
       logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
     }
   }, [logs, agentStage]);
 
-  const startRecording = async () => {
+  const speakText = (text: string, onEnd?: () => void) => {
+    if (!('speechSynthesis' in window)) {
+      if (onEnd) onEnd();
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const cleanText = text.replace(/[*#]/g, "");
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    utterance.rate = 1.05;
+    utterance.pitch = 1.0;
+
+    utterance.onstart = () => {
+      setIsSpeaking(true);
+      setAgentStage("SPEAKING");
+      addLog("tts", `Speaking: "${cleanText}"`);
+    };
+
+    utterance.onend = () => {
+      setIsSpeaking(false);
+      setAgentStage("STANDBY");
+      addLog("info", "Agent finished speaking.");
+      if (onEnd) onEnd();
+    };
+
+    utterance.onerror = (e) => {
+      console.error("SpeechSynthesis error:", e);
+      setIsSpeaking(false);
+      setAgentStage("STANDBY");
+      if (onEnd) onEnd();
+    };
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const startAutomatedListening = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
-      isRecordingRef.current = true;
-      hasSpokenRef.current = false;
+      isListeningRef.current = true;
+      speechDetectedRef.current = false;
 
-      setAgentStage("RECORDING_STT");
-      addLog("stt", "Mic open, listening...");
+      setIsListening(true);
+      setAgentStage("LISTENING");
+      addLog("stt", "Mic listening... Speak your request naturally.");
 
-      // Set up AudioContext + AnalyserNode for RMS-based silence detection
-      const audioContext = new window.AudioContext();
-      audioContextRef.current = audioContext;
-      const source = audioContext.createMediaStreamSource(stream);
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 2048;
-      analyser.smoothingTimeConstant = 0.3;
+      const audioCtx = new AudioContext();
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 1024;
       source.connect(analyser);
-      analyserRef.current = analyser;
 
-      const dataArray = new Float32Array(analyser.fftSize);
-      const SILENCE_DURATION_MS = 2000;
-      const MAX_RECORDING_MS = 55000; // Hard cap to avoid Google STT >1min error
-      const CALIBRATION_MS = 500; // Measure ambient noise for this long
-      const NOISE_MULTIPLIER = 3.0; // Speech must be Nx louder than noise floor
-      const MIN_THRESHOLD = 0.008; // Absolute minimum so dead silence still works
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
 
-      // --- Adaptive noise floor calibration ---
-      let isCalibrating = true;
-      let calibrationSamples: number[] = [];
-      let speechThreshold = 0.015; // default fallback
+      let silenceStart: number | null = null;
+      let noiseFloor = 10;
+      let frameCount = 0;
 
-      maxRecordingTimeoutRef.current = setTimeout(() => {
-        if (isRecordingRef.current) {
-          addLog("stt", "Max duration reached (55s).");
-          stopRecording();
-        }
-      }, MAX_RECORDING_MS);
-
-      const getRMS = (): number => {
-        analyser.getFloatTimeDomainData(dataArray);
-        let sumSquares = 0;
-        for (let i = 0; i < dataArray.length; i++) {
-          sumSquares += dataArray[i] * dataArray[i];
-        }
-        return Math.sqrt(sumSquares / dataArray.length);
-      };
-
-      // End calibration after CALIBRATION_MS
-      const calibrationTimer = setTimeout(() => {
-        isCalibrating = false;
-        if (calibrationSamples.length > 0) {
-          const avgNoise = calibrationSamples.reduce((a, b) => a + b, 0) / calibrationSamples.length;
-          speechThreshold = Math.max(avgNoise * NOISE_MULTIPLIER, MIN_THRESHOLD);
-          addLog("stt", `Calibrated: noise=${avgNoise.toFixed(4)}, threshold=${speechThreshold.toFixed(4)}`);
-        }
-      }, CALIBRATION_MS);
-
-      // Silence detection using setInterval (more reliable than requestAnimationFrame
-      // which can throttle in background tabs)
-      const checkSilence = () => {
-        if (!isRecordingRef.current) return;
-
-        const rms = getRMS();
-
-        // During calibration, just collect ambient noise samples
-        if (isCalibrating) {
-          calibrationSamples.push(rms);
+      const checkVAD = () => {
+        if (!isListeningRef.current) {
+          try { audioCtx.close(); } catch (e) {}
           return;
         }
 
-        if (rms > speechThreshold) {
-          // Sound above noise floor detected — this is speech
-          if (!hasSpokenRef.current) {
-            hasSpokenRef.current = true;
-            addLog("stt", "Speech detected");
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          sum += dataArray[i];
+        }
+        const average = sum / bufferLength;
+
+        // Dynamic noise floor calibration
+        if (frameCount < 10) {
+          noiseFloor = (noiseFloor + average) / 2;
+          frameCount++;
+        }
+
+        const speechThreshold = Math.max(noiseFloor * 2.2, 18);
+
+        if (average > speechThreshold) {
+          if (!speechDetectedRef.current) {
+            speechDetectedRef.current = true;
+            addLog("stt", "Speech detected... Listening to user turn.");
           }
-          // Clear any pending silence timeout — user is still speaking
-          if (silenceTimeoutRef.current) {
-            clearTimeout(silenceTimeoutRef.current);
-            silenceTimeoutRef.current = null;
+          silenceStart = null;
+        } else if (speechDetectedRef.current) {
+          if (!silenceStart) {
+            silenceStart = Date.now();
+          } else if (Date.now() - silenceStart > 1200) {
+            // End of turn detected automatically by speech envelope analysis
+            addLog("stt", "Automated end-of-turn detected. Processing request...");
+            stopAndSubmit();
+            try { audioCtx.close(); } catch (e) {}
+            return;
           }
-        } else if (hasSpokenRef.current && !silenceTimeoutRef.current) {
-          silenceTimeoutRef.current = setTimeout(() => {
-            if (isRecordingRef.current) {
-              addLog("stt", "2s silence, stopping");
-              stopRecording();
-            }
-          }, SILENCE_DURATION_MS);
+        }
+
+        requestAnimationFrame(checkVAD);
+      };
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
         }
       };
 
-      // Check every 100ms
-      silenceCheckIntervalRef.current = window.setInterval(checkSilence, 100);
+      mediaRecorder.start(100);
+      requestAnimationFrame(checkVAD);
 
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        addLog("stt", "Processing audio...");
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        await processVoiceInput(audioBlob);
-      };
-
-      mediaRecorder.start();
-      setIsRecording(true);
-    } catch (err) {
-      console.error("Error accessing microphone:", err);
-      addLog("error", "Failed to access microphone hardware.");
-      alert("Microphone access is required for voice input.");
+    } catch (err: any) {
+      addLog("error", `Mic error: ${err.message}`);
+      setIsListening(false);
+      setAgentStage("STANDBY");
     }
   };
 
-  const stopRecording = () => {
-    isRecordingRef.current = false;
+  const stopAndSubmit = () => {
+    isListeningRef.current = false;
+    setIsListening(false);
 
-    // Clear all timers
-    if (silenceTimeoutRef.current) {
-      clearTimeout(silenceTimeoutRef.current);
-      silenceTimeoutRef.current = null;
-    }
-    if (maxRecordingTimeoutRef.current) {
-      clearTimeout(maxRecordingTimeoutRef.current);
-      maxRecordingTimeoutRef.current = null;
-    }
-    if (silenceCheckIntervalRef.current) {
-      clearInterval(silenceCheckIntervalRef.current);
-      silenceCheckIntervalRef.current = null;
-    }
-
-    // Close audio context
-    if (audioContextRef.current) {
-      try { audioContextRef.current.close(); } catch (e) { }
-      audioContextRef.current = null;
-    }
-    analyserRef.current = null;
-
-    // Stop media recorder — use the recorder's state, not React state (which can be stale)
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
-      setIsRecording(false);
+      mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
+
+      setTimeout(async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        if (audioBlob.size > 0 && speechDetectedRef.current) {
+          await processAudioTurn(audioBlob);
+        } else {
+          addLog("info", "No speech detected. Resetting to standby.");
+          setAgentStage("STANDBY");
+        }
+      }, 200);
     }
   };
 
-  const processVoiceInput = async (audioBlob: Blob) => {
-    setIsLoading(true);
+  const processAudioTurn = async (blob: Blob) => {
     setAgentStage("THINKING_LLM");
-    addLog("stt", "Uploading to STT...");
+    addLog("llm", "Sending audio directly to Gemini 2.0 Flash...");
 
     try {
       const formData = new FormData();
-      formData.append("file", audioBlob, "audio.webm");
+      formData.append("file", blob, "turn.webm");
 
-      const sttRes = await fetch("/api/stt", {
+      const res = await fetch("/api/chat", {
         method: "POST",
-        body: formData,
+        body: formData
       });
 
-      const sttData = await sttRes.json();
-      if (sttData.text) {
-        addLog("stt", `STT: "${sttData.text}"`);
-        await executeMessageFlow(sttData.text);
-      } else {
-        throw new Error(sttData.error || "Failed to transcribe audio");
-      }
-    } catch (err: any) {
-      console.error("STT error:", err);
-      setMessages((prev) => [...prev, { role: "agent", content: "Sorry, I couldn't understand the audio." }]);
-      setIsLoading(false);
-      setAgentStage("STANDBY");
-    }
-  };
+      const data = await res.json();
 
-  const playTTS = (text: string) => {
-    if (!text) return;
-    const cleanText = text.replace(/[*#]/g, "");
-    textQueueRef.current.push(cleanText);
-    processTextQueue();
-  };
-
-  const processTextQueue = async () => {
-    if (isPlayingRef.current || textQueueRef.current.length === 0) return;
-
-    isPlayingRef.current = true;
-    setIsPlaying(true);
-    setAgentStage("SYNTHESIZING_TTS");
-    const text = textQueueRef.current.shift()!;
-    addLog("tts", "Synthesizing TTS...");
-
-    try {
-      const res = await fetch("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-
-      if (res.ok) {
-        addLog("tts", "Playing TTS audio");
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-
-        audio.play().catch(e => {
-          console.error("Error playing audio:", e);
-          isPlayingRef.current = false;
-          setIsPlaying(false);
-          processTextQueue();
-        });
-
-        audio.onended = () => {
-          isPlayingRef.current = false;
-          setIsPlaying(false);
-
-          if (textQueueRef.current.length > 0) {
-            processTextQueue();
-          } else {
-            setAgentStage("STANDBY");
-            addLog("info", "Playback complete, re-arming mic");
-            startRecording();
-          }
-        };
-      } else {
-        isPlayingRef.current = false;
-        setIsPlaying(false);
-        setAgentStage("STANDBY");
-        processTextQueue();
-      }
-    } catch (err: any) {
-      console.error("TTS error:", err);
-      addLog("error", `TTS Error: ${err.message}`);
-      isPlayingRef.current = false;
-      setIsPlaying(false);
-      setAgentStage("STANDBY");
-      processTextQueue();
-    }
-  };
-
-  const executeMessageFlow = async (text: string) => {
-    const newUserMsg = { role: "user" as const, content: text };
-    const newMsgs = [...messagesRef.current, newUserMsg];
-
-    setMessages(newMsgs);
-    fetchChatResponse(newMsgs);
-  };
-
-  const fetchChatResponse = async (history: any[]) => {
-    setIsLoading(true);
-    setAgentStage("THINKING_LLM");
-    addLog("llm", `Thinking... (${history.length} msgs)`);
-
-    try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history }),
-      });
-
-      const data = await response.json();
-
-      // Log tool call telemetry if tools were executed
       if (data.toolLogs && data.toolLogs.length > 0) {
         data.toolLogs.forEach((log: any) => {
           let toolDescription = "Calendar Tool Execution";
           if (log.tool === "list_events") toolDescription = "Checking Schedule & Conflict Detection";
-          else if (log.tool === "create_event") toolDescription = "Booking New Calendar Event";
-          else if (log.tool === "update_event") toolDescription = "Updating Existing Calendar Event";
-          else if (log.tool === "delete_event") toolDescription = "Deleting Calendar Event";
+          if (log.tool === "create_event") toolDescription = "Booking New Calendar Event";
+          if (log.tool === "update_event") toolDescription = "Updating Existing Calendar Event";
+          if (log.tool === "delete_event") toolDescription = "Deleting Calendar Event";
 
           setAgentStage("EXECUTING_TOOL");
           addLog("tool_call", `${log.tool} called — ${toolDescription}`);
           addLog("tool_result", `${log.tool} finished`);
         });
+        setRefreshKey(Date.now());
       }
 
-      const reply = data.reply || data.error || "Sorry, I encountered an unexpected error.";
-      addLog("llm", "Response generated");
-      setMessages((prev) => [...prev, { role: "agent", content: reply }]);
-
-      setRefreshKey(Date.now());
-      playTTS(reply);
-
-    } catch (error: any) {
-      console.error("Chat error:", error);
-      addLog("error", `Chat Error: ${error.message}`);
-      setMessages((prev) => [...prev, { role: "agent", content: "Sorry, I encountered an error while processing your request." }]);
+      if (data.reply) {
+        addLog("llm", `Response: "${data.reply}"`);
+        speakText(data.reply);
+      } else if (data.error) {
+        addLog("error", `Error: ${data.error}`);
+        setAgentStage("STANDBY");
+      }
+    } catch (err: any) {
+      addLog("error", `Process error: ${err.message}`);
       setAgentStage("STANDBY");
-    } finally {
-      setIsLoading(false);
     }
   };
 
-  const sendMessage = async (e: React.FormEvent) => {
+  const handleTextSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoading) return;
+    if (!inputText.trim()) return;
 
-    const userMessage = input.trim();
-    setInput("");
-    addLog("info", `User submitted typed directive: "${userMessage}"`);
-    await executeMessageFlow(userMessage);
+    const text = inputText.trim();
+    setInputText("");
+    addLog("info", `Text query: "${text}"`);
+    setAgentStage("THINKING_LLM");
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text })
+      });
+      const data = await res.json();
+
+      if (data.toolLogs && data.toolLogs.length > 0) {
+        data.toolLogs.forEach((log: any) => {
+          setAgentStage("EXECUTING_TOOL");
+          addLog("tool_call", `${log.tool} executed`);
+          addLog("tool_result", `${log.tool} completed`);
+        });
+        setRefreshKey(Date.now());
+      }
+
+      if (data.reply) {
+        addLog("llm", `Response: "${data.reply}"`);
+        speakText(data.reply);
+      }
+    } catch (err: any) {
+      addLog("error", `Text error: ${err.message}`);
+      setAgentStage("STANDBY");
+    }
   };
 
   if (status === "loading") {
@@ -431,10 +305,9 @@ export default function Home() {
 
   return (
     <div className="flex h-screen flex-col bg-[#F0F0F0] font-sans antialiased text-[#121212] overflow-hidden">
-      {/* Bauhaus Header */}
+      {/* Header */}
       <header className="flex h-16 shrink-0 items-center justify-between border-b-4 border-[#121212] bg-white px-8 z-20 relative shadow-[0_4px_0px_0px_#121212]">
         <div className="flex items-center gap-3 font-black text-xl tracking-tighter uppercase text-[#121212]">
-          {/* Bauhaus Geometric Composition Logo */}
           <div className="flex items-center gap-1.5">
             <div className="h-4 w-4 rounded-full bg-[#D02020] border-2 border-[#121212]"></div>
             <div className="h-4 w-4 rounded-none bg-[#1040C0] border-2 border-[#121212]"></div>
@@ -458,11 +331,11 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Main Canvas Split into Compact Calendar + Agent Inspector */}
+      {/* Main Content Area */}
       <main className="flex-1 w-full relative bg-[#F0F0F0] p-4 sm:p-6 overflow-y-auto">
         <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 items-start pb-28">
 
-          {/* Column 1: Compact Google Calendar Frame (7 Cols) */}
+          {/* Calendar Frame (7 Cols) */}
           <div className="lg:col-span-7 flex flex-col space-y-3">
             <div className="flex items-center justify-between border-b-2 border-[#121212] pb-2">
               <div className="flex items-center gap-2 font-black text-xs sm:text-sm uppercase tracking-wider text-[#121212]">
@@ -474,7 +347,6 @@ export default function Home() {
               </span>
             </div>
 
-            {/* Compact Calendar Frame */}
             <div className="w-full h-[460px] bg-white rounded-none border-4 border-[#121212] shadow-[8px_8px_0px_0px_#121212] overflow-hidden relative z-0">
               <iframe
                 key={refreshKey}
@@ -489,7 +361,7 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Column 2: Agent Execution Telemetry & Tool Call Log Console (Claude Code Style - 5 Cols) */}
+          {/* Telemetry Inspector Console (5 Cols) */}
           <div className="lg:col-span-5 flex flex-col space-y-3">
             <div className="flex items-center justify-between border-b-2 border-[#121212] pb-2">
               <div className="flex items-center gap-2 font-black text-xs sm:text-sm uppercase tracking-wider text-[#121212]">
@@ -506,7 +378,7 @@ export default function Home() {
               </button>
             </div>
 
-            {/* Stage Banner */}
+            {/* Stage Indicator */}
             <div className="flex items-center justify-between bg-[#121212] text-white p-3 border-4 border-[#121212] shadow-[4px_4px_0px_0px_#121212]">
               <div className="flex items-center gap-2">
                 <Cpu className="h-4 w-4 text-[#F0C020]" />
@@ -514,13 +386,13 @@ export default function Home() {
                   STAGE:
                 </span>
               </div>
-              <span className={`text-xs font-mono font-black uppercase tracking-widest px-2.5 py-0.5 rounded-none border border-white/20 ${agentStage === "RECORDING_STT"
+              <span className={`text-xs font-mono font-black uppercase tracking-widest px-2.5 py-0.5 rounded-none border border-white/20 ${agentStage === "LISTENING"
                 ? "bg-[#D02020] text-white animate-pulse"
                 : agentStage === "THINKING_LLM"
                   ? "bg-[#F0C020] text-[#121212]"
                   : agentStage === "EXECUTING_TOOL"
                     ? "bg-[#1040C0] text-white"
-                    : agentStage === "SYNTHESIZING_TTS"
+                    : agentStage === "SPEAKING"
                       ? "bg-purple-600 text-white"
                       : "bg-green-600 text-white"
                 }`}>
@@ -528,10 +400,8 @@ export default function Home() {
               </span>
             </div>
 
-            {/* Claude Code Style Terminal Output Box */}
+            {/* Terminal Feed */}
             <div className="w-full h-[400px] bg-[#121212] border-4 border-[#121212] shadow-[8px_8px_0px_0px_#121212] p-4 font-mono text-xs overflow-hidden flex flex-col justify-between">
-
-              {/* Window Controls Header */}
               <div className="flex items-center justify-between border-b border-white/20 pb-2 mb-3 text-[10px] text-white/50 uppercase tracking-widest shrink-0">
                 <div className="flex items-center gap-1.5">
                   <div className="h-2.5 w-2.5 rounded-full bg-[#D02020]"></div>
@@ -542,7 +412,6 @@ export default function Home() {
                 <span>LOGS: {logs.length}</span>
               </div>
 
-              {/* Scrollable Telemetry Feed */}
               <div ref={logContainerRef} className="flex-1 overflow-y-auto space-y-2.5 pr-1">
                 {logs.map((log) => (
                   <div key={log.id} className="text-left leading-relaxed border-l-2 pl-2.5 py-0.5 border-white/15">
@@ -574,68 +443,49 @@ export default function Home() {
                 ))}
               </div>
             </div>
-
           </div>
 
         </div>
 
-        {/* Bauhaus Floating Voice Controls */}
+        {/* Voice Floating Dock */}
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-3 w-full px-4 sm:px-0 max-w-lg">
-
-          {/* Main Voice Dock */}
           <div className="flex items-center gap-4 px-4 py-3 rounded-none bg-[#F0C020] border-4 border-[#121212] shadow-[6px_6px_0px_0px_#121212] transition-all">
             <button
               type="button"
-              onClick={isRecording ? stopRecording : startRecording}
-              disabled={isLoading && !isPlaying}
-              className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-none border-2 border-[#121212] transition-all shadow-[3px_3px_0px_0px_#121212] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer ${isRecording
+              onClick={isListening ? stopAndSubmit : startAutomatedListening}
+              className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-none border-2 border-[#121212] transition-all shadow-[3px_3px_0px_0px_#121212] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer ${isListening
                 ? "bg-[#D02020] text-white animate-pulse"
-                : isPlaying
-                  ? "bg-[#1040C0] text-white"
-                  : "bg-white text-[#121212] hover:bg-[#F0F0F0]"
-                } disabled:opacity-50`}
+                : "bg-white text-[#121212] hover:bg-[#F0F0F0]"
+                }`}
             >
-              {isRecording ? (
+              {isListening ? (
                 <Square className="h-5 w-5 fill-current" />
-              ) : isPlaying ? (
-                <Sparkles className="h-5 w-5" />
+              ) : isSpeaking ? (
+                <Sparkles className="h-5 w-5 animate-spin" />
               ) : (
                 <Mic className="h-5 w-5" />
               )}
             </button>
 
-            {isPlaying && (
+            {isSpeaking && (
               <div className="flex items-center justify-center gap-[4px] h-6 w-10 shrink-0 pr-2">
-                <div className="w-[4px] bg-[#121212] rounded-none h-full" style={{ animation: 'waveform 1s ease-in-out infinite 0.1s' }}></div>
-                <div className="w-[4px] bg-[#D02020] rounded-none h-full" style={{ animation: 'waveform 1.2s ease-in-out infinite 0.3s' }}></div>
-                <div className="w-[4px] bg-[#1040C0] rounded-none h-full" style={{ animation: 'waveform 0.8s ease-in-out infinite 0.0s' }}></div>
-                <div className="w-[4px] bg-[#121212] rounded-none h-full" style={{ animation: 'waveform 1.1s ease-in-out infinite 0.4s' }}></div>
-                <div className="w-[4px] bg-[#D02020] rounded-none h-full" style={{ animation: 'waveform 0.9s ease-in-out infinite 0.2s' }}></div>
+                <div className="w-[4px] bg-[#121212] rounded-none h-full animate-bounce"></div>
+                <div className="w-[4px] bg-[#D02020] rounded-none h-full animate-bounce delay-100"></div>
+                <div className="w-[4px] bg-[#1040C0] rounded-none h-full animate-bounce delay-200"></div>
               </div>
             )}
           </div>
 
-          {/* Secondary Transcription Tab */}
-          <div className="flex items-center px-6 py-3 rounded-none bg-white border-4 border-[#121212] shadow-[4px_4px_0px_0px_#121212] transition-all w-full">
-            <form onSubmit={sendMessage} className="flex flex-col flex-1 overflow-hidden min-w-0 text-center">
-              <span className="text-[10px] font-black tracking-widest uppercase text-[#D02020] mb-0.5">
-                {isRecording ? "LISTENING..." : isPlaying ? "SPEAKING..." : isLoading ? "THINKING..." : "VOICE ASSISTANT"}
-              </span>
-
-              {isRecording || isPlaying || isLoading ? (
-                <div className="text-sm text-[#121212] font-bold uppercase truncate w-full animate-fade-in">
-                  {messages.length > 0 ? messages[messages.length - 1].content : "Processing..."}
-                </div>
-              ) : (
-                <input
-                  type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="TAP MIC OR TYPE HERE..."
-                  disabled={isRecording || isPlaying}
-                  className="w-full bg-transparent border-none p-0 m-0 text-sm text-center text-[#121212] font-bold uppercase placeholder:text-[#121212]/50 focus:ring-0 focus:outline-none"
-                />
-              )}
+          <div className="flex items-center px-4 py-2 rounded-none bg-white border-4 border-[#121212] shadow-[4px_4px_0px_0px_#121212] transition-all w-full">
+            <form onSubmit={handleTextSubmit} className="flex items-center w-full gap-2">
+              <input
+                type="text"
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                placeholder={isListening ? "AUTOMATED VAD LISTENING..." : isSpeaking ? "SPEAKING..." : "TYPE OR TAP MIC..."}
+                disabled={isListening || isSpeaking}
+                className="flex-1 bg-transparent border-none text-xs font-bold uppercase text-[#121212] focus:outline-none placeholder:text-[#121212]/50"
+              />
             </form>
           </div>
         </div>
