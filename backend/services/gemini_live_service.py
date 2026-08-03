@@ -34,6 +34,31 @@ LIVE_TOOLS = [
                 },
                 required=["title", "startTime", "endTime"]
             )
+        ),
+        types.FunctionDeclaration(
+            name="delete_event",
+            description="Deletes an existing event from the user's Google Calendar.",
+            parameters=types.Schema(
+                type="OBJECT",
+                properties={
+                    "eventId": types.Schema(type="STRING", description="Unique ID of the event to delete")
+                },
+                required=["eventId"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="update_event",
+            description="Updates an existing event on the user's Google Calendar.",
+            parameters=types.Schema(
+                type="OBJECT",
+                properties={
+                    "eventId": types.Schema(type="STRING", description="Unique ID of the event"),
+                    "title": types.Schema(type="STRING", description="New title"),
+                    "startTime": types.Schema(type="STRING", description="New start time (ISO)"),
+                    "endTime": types.Schema(type="STRING", description="New end time (ISO)")
+                },
+                required=["eventId"]
+            )
         )
     ])
 ]
@@ -143,6 +168,19 @@ async def handle_gemini_live_websocket(websocket: WebSocket):
                                                 args.get("title", "Meeting"),
                                                 args.get("startTime", ""),
                                                 args.get("endTime", ""),
+                                                args.get("attendees")
+                                            )
+                                            result = {"status": "success", "eventId": event.get("id"), "summary": event.get("summary")}
+                                        elif name == "delete_event":
+                                            delete_res = calendar_service.delete_event(access_token, args.get("eventId", ""))
+                                            result = {"status": "success", "result": delete_res}
+                                        elif name == "update_event":
+                                            event = calendar_service.update_event(
+                                                access_token,
+                                                args.get("eventId", ""),
+                                                args.get("title"),
+                                                args.get("startTime"),
+                                                args.get("endTime"),
                                                 args.get("attendees")
                                             )
                                             result = {"status": "success", "eventId": event.get("id"), "summary": event.get("summary")}
